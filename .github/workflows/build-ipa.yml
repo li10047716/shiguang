@@ -25,12 +25,23 @@ jobs:
 
       - name: 生成 Xcode 工程
         working-directory: packaging/ios/app
-        run: xcodegen generate
+        run: |
+          set -o pipefail
+          xcodegen generate 2>&1 | tee xcodegen.log | tail -20
+      - name: 上报失败日志（生成失败时）
+        if: failure()
+        working-directory: packaging/ios/app
+        run: |
+          {
+            echo "### xcodegen 输出（尾部 60 行）"
+            echo '```'
+            tail -60 xcodegen.log 2>/dev/null || echo "(无日志)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: 编译（免签名，产出 .app）
         working-directory: packaging/ios/app
         run: |
-          set -o pipefail
           xcodebuild \
             -project ShiguangReader.xcodeproj \
             -scheme ShiguangReader \
@@ -40,7 +51,18 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             -derivedDataPath build \
-            build 2>&1 | tail -40
+            build 2>&1 | tee xcodebuild.log | tail -25
+          exit ${PIPESTATUS[0]}
+      - name: 上报失败日志（编译失败时）
+        if: failure()
+        working-directory: packaging/ios/app
+        run: |
+          {
+            echo "### xcodebuild 错误（相关行）"
+            echo '```'
+            grep -E "error:|warning: .*(No such|not found)|BUILD" xcodebuild.log | tail -40 || tail -40 xcodebuild.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: 打包为未签名 ipa
         run: |

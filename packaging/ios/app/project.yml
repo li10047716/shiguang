@@ -14,6 +14,8 @@ targets:
     sources:
       # Swift/ObjC 源码
       - path: src
+      # 图标等资源
+      - path: Assets.xcassets
       # 应用代码目录（prepare.sh 生成）：以文件夹引用方式整体拷进 bundle 根目录
       - path: Resources/app
         type: folder
