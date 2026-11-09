@@ -72,7 +72,9 @@
   async function api(path, opt) {
     const init = Object.assign({}, opt);
     const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 25000);  // 卡住的请求别让界面一直转圈
+    // 搜索要并发抓 8 个书源，手机网络下给足时间；其它接口维持 25 秒
+    const timeout = path.indexOf('/api/search') === 0 ? 60000 : 25000;
+    const timer = setTimeout(() => ac.abort(), timeout);
     if (!init.signal) init.signal = ac.signal;
     try {
       const r = await fetch(path, init);
@@ -903,14 +905,21 @@
     if (kw) runSearch(kw, src);
   }
 
-  async function runSearch(kw, src = 'all') {
+  async function runSearch(kw, src = 'all', fresh = false) {
     const seq = ++SEARCH_SEQ[0];
     try {
-      const data = await api(`/api/search?q=${encodeURIComponent(kw)}&src=${src}`);
+      const data = await api(`/api/search?q=${encodeURIComponent(kw)}&src=${src}${fresh ? '&_=' + Date.now() : ''}`);
       const box = $('#sres');
       if (!box || seq !== SEARCH_SEQ[0]) return;
+      // 部分书源失败时给出原因与重试入口，不再默默只显示「没找到」
+      const failNote = data.msg ? `<div class="fail-note">
+        <b>${data.books.length ? '部分书源请求失败' : '书源请求失败'}</b>
+        <span>${esc(data.msg)}</span>
+        <div><button class="btn sm ghost" id="retry-search">重新搜索</button></div>
+      </div>` : '';
       if (!data.books.length) {
-        box.innerHTML = `<div class="empty"><div class="ic">🔍</div><p>${esc(data.msg || '没有找到相关小说')}</p></div>`;
+        box.innerHTML = `${failNote}<div class="empty"><div class="ic">🔍</div><p>${esc(data.msg ? '请检查网络后重试' : '没有找到相关小说')}</p></div>`;
+        bindRetry(box);
         return;
       }
       const cnt = (name) => data.books.filter((b) => b.source === name).length;
@@ -918,7 +927,7 @@
         ['全本网', cnt('全本小说网')], ['八叉', cnt('八叉书库')], ['八一', cnt('八一中文网')],
         ['得奇', cnt('得奇小说网')], ['爱丽丝', cnt('爱丽丝书屋')]]
         .filter(([, n]) => n).map(([name, n]) => `${name} ${n} 本`).join(' · ');
-      box.innerHTML =
+      box.innerHTML = failNote +
         `<p class="rank-note">共 ${data.books.length} 本${mix ? `（${mix}）` : ''}</p>` +
         `<div class="list">${data.books.map((b) => `
         <a class="item" href="#/book/${encodeURIComponent(b.id)}">
@@ -936,10 +945,25 @@
             <div class="intro">${esc(b.intro || '')}</div>
           </div>
         </a>`).join('')}</div>`;
+      bindRetry(box);
     } catch (e) {
       const box = $('#sres');
-      if (box) box.innerHTML = `<div class="fail"><p>搜索失败：${esc(e.message)}</p></div>`;
+      if (box) {
+        box.innerHTML = `<div class="fail"><p>搜索失败：${esc(e.message)}</p>
+          <button class="btn sm ghost" id="retry-search">重新搜索</button></div>`;
+        bindRetry(box);
+      }
     }
+  }
+
+  function bindRetry(box) {
+    const btn = box.querySelector('#retry-search');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const kw = $('#sq') ? $('#sq').value.trim() : '';
+      const src = $('#ssrc') ? $('#ssrc').value : 'all';
+      if (kw) runSearch(kw, src, true);
+    });
   }
 
   // ---------------------------------------------------------------- 视图：详情
@@ -1060,13 +1084,20 @@
     const pw = rEl.scroll.clientWidth;
     if (pw <= 0) return;
     R.pw = pw;
-    const rw = state.settings.w || 720; // 页宽设置作为正文最大宽度
-    const M = Math.max(40, Math.ceil((pw - rw) / 2));
+    const mobile = window.matchMedia('(max-width: 640px)').matches;
+    const cs = getComputedStyle(document.documentElement);
+    const sat = parseFloat(cs.getPropertyValue('--sat')) || 0;   // 刘海/状态栏
+    const sab = parseFloat(cs.getPropertyValue('--sab')) || 0;   // Home 指示条
+    const rw = mobile ? 0 : (state.settings.w || 720);          // 手机上不套桌面页宽
+    const M = mobile
+      ? Math.max(14, Math.round(pw * 0.055))
+      : Math.max(40, Math.ceil((pw - rw) / 2));
     const a = rEl.article;
     a.style.width = pw + 'px';
     a.style.columnWidth = (pw - 2 * M) + 'px';
     a.style.columnGap = (2 * M) + 'px';
-    a.style.padding = '44px ' + M + 'px';
+    a.style.padding = (mobile ? 22 + sat : 44) + 'px ' + M + 'px '
+                    + (mobile ? 22 + sab : 44) + 'px';
     R.pages = Math.max(1, Math.round(a.scrollWidth / pw));
   }
 
@@ -1417,7 +1448,9 @@
   });
 
   // 点正文：左 1/3 上一页，右 1/3 下一页，中间呼出/收起控制面板
+  let swiped = false;
   rEl.scroll.addEventListener('click', (e) => {
+    if (swiped) { swiped = false; return; }  // 滑动翻页后浏览器还会补一次 click，别重复翻
     if (e.target.closest('button, a, input')) return;
     const sel = window.getSelection ? String(window.getSelection()) : '';
     if (sel.trim()) return; // 正在划词选中，不打断
@@ -1449,11 +1482,16 @@
     const dx = e.changedTouches[0].clientX - tX;
     const dy = e.changedTouches[0].clientY - tY;
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
+      swiped = true;
       if (dx < 0) nextPage(); else prevPage();
     }
   }, { passive: true });
 
   window.addEventListener('resize', () => {
+    if (!reader.hidden) relayout();
+  });
+  // 手机横竖屏切换 / 键盘收起后视口变化，重新分页
+  window.visualViewport && window.visualViewport.addEventListener('resize', () => {
     if (!reader.hidden) relayout();
   });
 

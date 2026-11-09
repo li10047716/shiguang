@@ -19,6 +19,7 @@ echo "==> [1/4] 同步应用代码"
 rm -rf "$RES/app"
 mkdir -p "$RES/app"
 cp "$REPO_ROOT/app.py" "$RES/app/"
+cp "$REPO_ROOT/certs/cacert.pem" "$RES/app/cacert.pem"   # iOS 无系统 CA，HTTPS 书源要用
 cp -R "$REPO_ROOT/reader" "$RES/app/reader"
 find "$RES/app" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 cp -R "$REPO_ROOT/web" "$RES/app/web"

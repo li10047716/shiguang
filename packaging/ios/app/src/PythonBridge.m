@@ -38,6 +38,8 @@ void shiguang_start_python(NSString *root, NSString *data) {
         "try:\n"
         "    root = os.environ['SUDUGU_ROOT']\n"
         "    data = os.environ['SUDUGU_DATA']\n"
+        "    os.environ.setdefault('SUDUGU_EMBEDDED', '1')\n"
+        "    os.environ.setdefault('SSL_CERT_FILE', os.path.join(root, 'cacert.pem'))\n"
         "    os.makedirs(data, exist_ok=True)\n"
         "    os.chdir(data)\n"
         "    sys.path.insert(0, root)\n"

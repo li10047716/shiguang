@@ -11,6 +11,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from html import unescape
 
 from . import ali, bc, blxs, dq, qbxs, qm, shuqi
@@ -298,60 +299,54 @@ def search(keyword, src="all", page=1):
         return {"books": [], "msg": "搜索词至少 2 个汉字"}
 
     src = (src or "all").lower()
-    books, notes = [], []
+    # 各书源并发请求：手机网络下单源最慢 20 秒，串行 8 个源会让前端直接超时。
+    # 结果仍按固定顺序合并，保证混排列表稳定；单个源失败不影响其它源。
+    jobs = []
     if src in ("all", "sd"):
+        jobs.append(("速读谷", lambda: _search_sd(keyword), 0))
+    if src in ("all", "qm"):
+        jobs.append(("七猫", lambda: qm.search(keyword, page), 0))
+    if src in ("all", "sq"):
+        jobs.append(("书旗", lambda: shuqi.search(keyword, page), 0))
+    if src in ("all", "qb"):
+        jobs.append(("全本", lambda: qbxs.search(keyword, page), 0))
+    if src in ("all", "bc"):
+        jobs.append(("八叉", lambda: bc.search(keyword, page), 0))
+    if src in ("all", "bl"):
+        jobs.append(("八一", lambda: blxs.search(keyword, page), 20 if src == "all" else 0))
+    if src in ("all", "dq"):
+        jobs.append(("得奇", lambda: dq.search(keyword, page), 20 if src == "all" else 0))
+    if src in ("all", "ali"):
+        jobs.append(("爱丽丝", lambda: ali.search(keyword, page), 0))
+
+    books, notes = [], []
+    if len(jobs) == 1:
+        name, fn, limit = jobs[0]
         try:
-            r = _search_sd(keyword)
-            books.extend(r["books"])
+            r = fn()
+            out = r.get("books", [])
+            books.extend(out[:limit] if limit else out)
             if r.get("msg"):
                 notes.append(r["msg"])
         except Exception as e:  # noqa: BLE001
-            notes.append("速读谷：%s" % e)
-    if src in ("all", "qm"):
+            notes.append("%s：%s" % (name, e))
+    else:
+        ex = ThreadPoolExecutor(max_workers=min(8, len(jobs)))
+        futs = [(name, limit, ex.submit(fn)) for name, fn, limit in jobs]
         try:
-            r = qm.search(keyword, page)
-            books.extend(r["books"])
-        except Exception as e:  # noqa: BLE001
-            notes.append("七猫：%s" % e)
-    if src in ("all", "sq"):
-        try:
-            r = shuqi.search(keyword, page)
-            books.extend(r["books"])
-        except Exception as e:  # noqa: BLE001
-            notes.append("书旗：%s" % e)
-    if src in ("all", "qb"):
-        try:
-            r = qbxs.search(keyword, page)
-            books.extend(r["books"])
-        except Exception as e:  # noqa: BLE001
-            notes.append("全本：%s" % e)
-    if src in ("all", "bc"):
-        try:
-            r = bc.search(keyword, page)
-            books.extend(r["books"])
-        except Exception as e:  # noqa: BLE001
-            notes.append("八叉：%s" % e)
-    if src in ("all", "bl"):
-        try:
-            r = blxs.search(keyword, page)
-            # 八一一次给 50 条，混排时截一下，免得别的源被挤没
-            books.extend(r["books"][:20] if src == "all" else r["books"])
-        except Exception as e:  # noqa: BLE001
-            notes.append("八一：%s" % e)
-    if src in ("all", "dq"):
-        try:
-            r = dq.search(keyword, page)
-            # 得奇一页 40 条且不翻页，混排时同样截一下
-            books.extend(r["books"][:20] if src == "all" else r["books"])
-        except Exception as e:  # noqa: BLE001
-            notes.append("得奇：%s" % e)
-    if src in ("all", "ali"):
-        try:
-            r = ali.search(keyword, page)
-            # 爱丽丝书屋一页只有 10 条，混排时照单全收
-            books.extend(r["books"])
-        except Exception as e:  # noqa: BLE001
-            notes.append("爱丽丝：%s" % e)
+            for name, limit, fut in futs:
+                try:
+                    r = fut.result(timeout=25)
+                    out = r.get("books", [])
+                    books.extend(out[:limit] if limit else out)
+                    if r.get("msg"):
+                        notes.append(r["msg"])
+                except FutureTimeout:
+                    notes.append("%s：请求超时" % name)
+                except Exception as e:  # noqa: BLE001
+                    notes.append("%s：%s" % (name, e))
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
     return {"books": books, "msg": "；".join(notes)}
 
 

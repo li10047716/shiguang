@@ -7,6 +7,7 @@ if not exist "%DST%" mkdir "%DST%"
 
 set ROOT=%~dp0..\..
 copy /y "%ROOT%\app.py" "%DST%\app.py" >nul
+copy /y "%ROOT%\certs\cacert.pem" "%DST%\cacert.pem" >nul
 xcopy /e /i /y "%ROOT%\reader" "%DST%\reader" >nul
 xcopy /e /i /y "%ROOT%\web" "%DST%\web" >nul
 

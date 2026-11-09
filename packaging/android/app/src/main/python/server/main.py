@@ -17,5 +17,6 @@ sys.path.insert(0, _HERE)
 
 def android_main(data_dir):
     os.environ["SUDUGU_DATA"] = data_dir
+    os.environ["SUDUGU_EMBEDDED"] = "1"   # 内嵌 CPython 无系统 CA，用打包的 Mozilla CA 包
     import app
     app.serve_forever()

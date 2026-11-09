@@ -28,6 +28,14 @@ for d in (DATA, CACHE, IMG):
     os.makedirs(d, exist_ok=True)
 
 sys.path.insert(0, ROOT)
+
+# iOS / Android 内嵌 CPython 没有系统 CA 根证书，HTTPS 请求会全部报
+# CERTIFICATE_VERIFY_FAILED。打包时把 certs/cacert.pem 放到代码根目录，
+# 这里显式告诉 OpenSSL 去哪里找根证书（桌面端仍用系统证书，不受影响）。
+if sys.platform in ("ios", "android") or os.environ.get("SUDUGU_EMBEDDED"):
+    _ca = os.path.join(ROOT, "cacert.pem")
+    if os.path.exists(_ca):
+        os.environ.setdefault("SSL_CERT_FILE", _ca)
 from reader import ali, bc, blxs, core, dq, qbxs, qm, shuqi  # noqa: E402
 
 _LOCK = threading.Lock()
@@ -789,7 +797,9 @@ class Handler(BaseHTTPRequestHandler):
             if not kw:
                 return self._json({"books": [], "msg": ""})
             key = "search_%s_%s" % (src, kw)
-            data = cache_get(key, ttl=600)
+            # 前端「重新搜索」带 _=时间戳，跳过缓存重新抓所有书源
+            fresh = bool(self._arg("_"))
+            data = None if fresh else cache_get(key, ttl=600)
             if not data:
                 data = core.search(kw, src)
                 if data.get("books"):
