@@ -1,0 +1,14 @@
+{
+  "name": "拾光阅读器",
+  "short_name": "拾光",
+  "description": "本地多书源小说阅读器",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6eeda",
+  "theme_color": "#b0512f",
+  "icons": [
+    { "src": "/icon-256.png", "sizes": "256x256", "type": "image/png", "purpose": "any" }
+  ]
+}

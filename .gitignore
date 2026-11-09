@@ -1,0 +1,21 @@
+# 拾光阅读器 — 打包产物与本地环境
+__pycache__/
+*.py[cod]
+
+# 用户数据（书架/阅读记录/缓存，不要上传）
+data/
+
+# 本地打包产物
+dist/
+build/
+*.ipa
+*.exe
+
+# iOS 工程生成物（CI 每次 prepare.sh + xcodegen 重新生成）
+packaging/ios/app/Resources/
+packaging/ios/app/Frameworks/
+packaging/ios/app/ShiguangReader.xcodeproj/
+packaging/ios/app/build/
+
+# 预览截图
+preview-*.png

@@ -1,0 +1,19 @@
+# 行尾规范：macOS/CI 脚本必须 LF，Windows 批处理必须 CRLF
+* text=auto
+
+*.sh   text eol=lf
+*.py   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.swift text eol=lf
+*.m    text eol=lf
+*.h    text eol=lf
+*.kt   text eol=lf
+*.gradle text eol=lf
+*.md   text eol=lf
+*.css  text eol=lf
+*.js   text eol=lf
+
+*.bat  text eol=crlf
+*.vbs  text eol=crlf

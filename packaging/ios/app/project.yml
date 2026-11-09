@@ -1,0 +1,68 @@
+// Xcode 工程由 xcodegen 从本文件生成（本地或 CI 均可）：
+//   cd packaging/ios/app && xcodegen generate
+name: ShiguangReader
+options:
+  bundleIdPrefix: com.shiguang
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "15.0"
+
+targets:
+  ShiguangReader:
+    type: application
+    platform: iOS
+    sources:
+      # Swift/ObjC 源码
+      - path: src
+      # 应用代码目录（prepare.sh 生成）：以文件夹引用方式整体拷进 bundle 根目录
+      - path: Resources/app
+        type: folder
+        buildPhase: resources
+      # Python 标准库目录（prepare.sh 从 Python-Apple-support 解出）：
+      # 最终位于 bundle 根目录 python/，即 PYTHONHOME
+      - path: Resources/python
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shiguang.reader
+        SWIFT_OBJC_BRIDGING_HEADER: src/BridgingHeader.h
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.0.0"
+        ENABLE_BITCODE: NO
+    dependencies:
+      - framework: Frameworks/Python.xcframework
+        embed: true
+        codeSign: true
+    info:
+      path: src/Info.plist
+      properties:
+        CFBundleDisplayName: 拾光阅读器
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        # WKWebView / URLSession 访问本机 127.0.0.1 HTTP 服务需要放行本地网络
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+
+schemes:
+  ShiguangReader:
+    build:
+      targets:
+        ShiguangReader: all
+    run:
+      config: Debug
+    archive:
+      config: Release

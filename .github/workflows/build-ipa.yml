@@ -1,0 +1,57 @@
+name: Build iOS IPA
+
+# 触发方式：
+#   - Actions 页面手动运行（workflow_dispatch）
+#   - 打 v* 标签自动运行
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  ipa:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 准备应用代码与 CPython 支持包
+        run: bash packaging/ios/ci/prepare.sh
+
+      - name: 安装 xcodegen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        working-directory: packaging/ios/app
+        run: xcodegen generate
+
+      - name: 编译（免签名，产出 .app）
+        working-directory: packaging/ios/app
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ShiguangReader.xcodeproj \
+            -scheme ShiguangReader \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            -derivedDataPath build \
+            build 2>&1 | tail -40
+
+      - name: 打包为未签名 ipa
+        run: |
+          mkdir -p output Payload
+          cp -R packaging/ios/app/build/Build/Products/Release-iphoneos/ShiguangReader.app Payload/
+          zip -qry output/ShiguangReader-unsigned.ipa Payload
+          ls -lh output/
+
+      - name: 上传 ipa（在 Actions 运行页面的 Artifacts 里下载）
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShiguangReader-ipa
+          path: output/ShiguangReader-unsigned.ipa
+          if-no-files-found: error

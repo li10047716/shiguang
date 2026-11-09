@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>拾光阅读器</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/favicon.ico">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-256.png">
+<link rel="apple-mobile-web-app-capable" content="yes">
+<link rel="apple-mobile-web-app-title" content="拾光阅读器">
+<link rel="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div id="shell">
+  <aside class="rail">
+    <nav class="nav">
+      <a href="#/shelf" data-nav="shelf">
+        <svg viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H9v16H5.5A1.5 1.5 0 0 1 4 18.5v-13Z"/><path d="M9 4h4.5A1.5 1.5 0 0 1 15 5.5v13a1.5 1.5 0 0 1-1.5 1.5H9"/><path d="M15 4.6l3.3.9a1.5 1.5 0 0 1 1.06 1.84l-3.2 12.1"/></svg>
+        <span>书架</span>
+      </a>
+      <a href="#/discover" data-nav="discover">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M15.2 8.8l-1.9 4.5-4.5 1.9 1.9-4.5 4.5-1.9Z"/></svg>
+        <span>发现</span>
+      </a>
+      <a href="#/rank" data-nav="rank">
+        <svg viewBox="0 0 24 24"><path d="M5 19V11"/><path d="M12 19V5"/><path d="M19 19v-6"/></svg>
+        <span>排行榜</span>
+      </a>
+      <a href="#/mine" data-nav="mine">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c1.2-3.6 3.8-5.4 7-5.4s5.8 1.8 7 5.4"/></svg>
+        <span>我的</span>
+      </a>
+    </nav>
+  </aside>
+
+  <main id="view" tabindex="-1"></main>
+</div>
+
+<!-- ================= 阅读器 ================= -->
+<section id="reader" class="reader" hidden data-rtheme="paper">
+  <div class="r-scroll" id="r-scroll">
+    <article class="r-article" id="r-article"></article>
+    <div class="r-end" id="r-end">
+      <button class="btn ghost" id="r-end-prev">上一章</button>
+      <button class="btn" id="r-end-next">下一章</button>
+    </div>
+  </div>
+
+  <!-- 底部中央呼出面板：上一章 / 本章进度 / 下一章 + 目录、设置 -->
+  <button class="r-back" id="r-back" title="返回 (Esc)">
+    <svg viewBox="0 0 24 24"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>
+  </button>
+
+  <!-- 右上角：加入书架 / 更多菜单 -->
+  <button class="r-shelf" id="r-shelf" title="加入书架"></button>
+  <button class="r-more" id="r-more" title="更多">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="5.2" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="18.8" r="1.7"/></svg>
+  </button>
+  <div class="r-menu" id="r-menu" hidden>
+    <button id="r-menu-detail">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>书籍详情
+    </button>
+    <button id="r-menu-dl">
+      <svg viewBox="0 0 24 24"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 19h14"/></svg>下载本书
+    </button>
+  </div>
+
+  <footer class="r-bottom" id="r-bottom">
+    <div class="r-panel">
+      <div class="rp-row">
+        <button class="rb-nav" id="r-prev" title="上一章 (←)">上一章</button>
+        <input type="range" id="r-slider" min="0" max="1000" value="0" title="拖动调整本章进度">
+        <button class="rb-nav" id="r-next" title="下一章 (→)">下一章</button>
+      </div>
+      <div class="rp-row icons">
+        <button class="rb-btn" id="r-toc-btn" title="目录 (T)">
+          <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        </button>
+        <button class="rb-btn" id="r-set-btn" title="阅读设置">
+          <span class="aa">Aa</span>
+        </button>
+      </div>
+    </div>
+  </footer>
+
+  <!-- 角落状态：左下全书进度 / 右下本章页码 -->
+  <div class="r-corner left" id="r-pct">0%</div>
+  <div class="r-corner right" id="r-page">1 / 1</div>
+
+
+  <div class="r-drawer" id="r-drawer" hidden>
+    <div class="drawer-head">
+      <input id="toc-filter" placeholder="跳转到章节…" autocomplete="off">
+      <button class="icon-btn" id="toc-close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div class="drawer-body" id="toc-list"></div>
+  </div>
+
+  <div class="r-set" id="r-set" hidden>
+    <div class="set-row">
+      <label>字号</label>
+      <div class="stepper">
+        <button data-fs="-1">A－</button><span id="fs-val">19</span><button data-fs="1">A＋</button>
+      </div>
+    </div>
+    <div class="set-row">
+      <label>行距</label>
+      <input type="range" id="set-lh" min="150" max="260" step="5">
+    </div>
+    <div class="set-row">
+      <label>页宽</label>
+      <input type="range" id="set-w" min="520" max="1000" step="20">
+    </div>
+    <div class="set-row">
+      <label>字体</label>
+      <div class="seg" id="set-font">
+        <button data-font="serif">宋体</button>
+        <button data-font="kai">楷体</button>
+        <button data-font="sans">黑体</button>
+      </div>
+    </div>
+    <div class="set-row">
+      <label>主题</label>
+      <div class="swatches" id="set-theme">
+        <button data-theme="paper" title="纸黄"></button>
+        <button data-theme="white" title="素白"></button>
+        <button data-theme="green" title="护眼"></button>
+        <button data-theme="night" title="夜间"></button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div id="toast" class="toast" hidden></div>
+<div id="loading" class="loading" hidden><div class="spinner"></div></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
