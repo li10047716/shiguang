@@ -1,5 +1,5 @@
-// Xcode 工程由 xcodegen 从本文件生成（本地或 CI 均可）：
-//   cd packaging/ios/app && xcodegen generate
+# Xcode 工程由 xcodegen 从本文件生成（本地或 CI 均可）：
+#   cd packaging/ios/app && xcodegen generate
 name: ShiguangReader
 options:
   bundleIdPrefix: com.shiguang
