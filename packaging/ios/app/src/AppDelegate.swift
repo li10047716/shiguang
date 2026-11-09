@@ -21,7 +21,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // ---- 1. 计算路径并启动内嵌 Python 服务 ----
         let root = Bundle.main.resourceURL!.appendingPathComponent("app").path
         let docs = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0]
-        shiguang_start_python(root as NSString, docs as NSString)
+        shiguang_start_python(root, docs)
 
         // ---- 2. 搭建 WKWebView 界面 ----
         let window = UIWindow(frame: UIScreen.main.bounds)
