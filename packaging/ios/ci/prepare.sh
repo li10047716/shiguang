@@ -41,22 +41,25 @@ if [ -z "$XCFRAMEWORK" ]; then
     echo "错误：解包结果里找不到 Python.xcframework（上面已打印目录结构）" >&2
     exit 1
 fi
+rm -rf "$FRAMEWORKS/Python.xcframework"
 cp -R "$XCFRAMEWORK" "$FRAMEWORKS/Python.xcframework"
+# 真机 ipa 不需要模拟器切片和构建辅助文件
+rm -rf "$FRAMEWORKS/Python.xcframework/ios-arm64_x86_64-simulator" \
+       "$FRAMEWORKS/Python.xcframework/build"
 
-# 标准库目录：形如 .../ios-arm64/Python.framework/python（内含 lib/python3.13/...）
-PYHOME_SRC="$(find "$FRAMEWORKS/Python.xcframework" -type d -name python -path "*Python.framework*" | head -1)"
-if [ -z "$PYHOME_SRC" ]; then
-    # 兼容旧布局：stdlib 以 python-stdlib 目录形式提供
-    PYHOME_SRC="$(find "$TMP/extract" -type d \( -name "python" -o -name "python-stdlib" \) -maxdepth 4 | head -1)"
-fi
-if [ -z "$PYHOME_SRC" ]; then
-    echo "错误：找不到 Python 标准库目录（python / python-stdlib）" >&2
+# PYTHONHOME = 真机切片根目录（内含 lib/python3.13 与 Python.framework）
+PYHOME_SRC="$FRAMEWORKS/Python.xcframework/ios-arm64"
+if [ ! -d "$PYHOME_SRC/lib/python3.13" ]; then
+    echo "错误：$PYHOME_SRC/lib/python3.13 不存在，支持包结构可能变化" >&2
     exit 1
 fi
+rm -rf "$RES/python"
 mkdir -p "$RES"
+# 标准库运行时不需要交叉编译工具链和头文件
 cp -R "$PYHOME_SRC" "$RES/python"
-echo "    PYTHONHOME 来源: $PYHOME_SRC"
-ls "$RES/python" | head -10
+rm -rf "$RES/python/bin" "$RES/python/include"
+echo "    PYTHONHOME: $PYHOME_SRC"
+ls "$RES/python"
 
 echo "==> [4/4] 生成 AppIcon（1024）"
 ICON_DIR="$APP_DIR/Assets.xcassets/AppIcon.appiconset"
