@@ -68,6 +68,86 @@
     return `<span class="src-dot ${meta[0]}">${esc(meta[1])}</span>`;
   };
 
+  // ---------------------------------------------------------------- 液态玻璃组件
+  const ICONS = {
+    back: '<svg viewBox="0 0 24 24"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>',
+    search: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>',
+    dots: '<svg viewBox="0 0 24 24" class="ico-dots"><path d="M12 5.2v.1M12 12v.1M12 18.8v.1" stroke-width="3.6"/></svg>',
+    grid: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.4"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.4"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.4"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.4"/></svg>',
+    list: '<svg viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h16" stroke-width="2.1"/></svg>',
+    refresh: '<svg viewBox="0 0 24 24"><path d="M19 8.4A7.5 7.5 0 1 0 19 15.2"/><path d="M19 4.6v4h-4"/></svg>',
+    filter: '<svg viewBox="0 0 24 24"><path d="M5 7h14M8 12h8M11 17h2"/></svg>',
+    chev: '<svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg>',
+    close: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    check: '<svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
+  };
+
+  // 轻量弹出菜单：锚定在按钮下方，玻璃质感，点外面自动收起
+  let popEl = null;
+  let popKey = '';
+  function closePop() {
+    if (popEl) popEl.remove();
+    popEl = null;
+    popKey = '';
+  }
+  function openPop(anchor, items, title, key) {
+    closePop();
+    const el = document.createElement('div');
+    el.className = 'glass-pop';
+    el.innerHTML = (title ? `<div class="gp-title">${esc(title)}</div>` : '') +
+      items.map((it, i) => `<button class="gp-item ${it.on ? 'on' : ''}" data-i="${i}">
+        <span>${esc(it.label)}</span>${it.on ? ICONS.check : ''}</button>`).join('');
+    document.body.appendChild(el);
+    const r = anchor.getBoundingClientRect();
+    const w = Math.min(236, window.innerWidth - 24);
+    el.style.width = w + 'px';
+    // 以按钮中心对齐，贴边时自动夹回屏幕内
+    const left = r.left + r.width / 2 - w / 2;
+    el.style.left = Math.max(12, Math.min(left, window.innerWidth - w - 12)) + 'px';
+    el.style.top = Math.min(r.bottom + 8, window.innerHeight - 60) + 'px';
+    el.querySelectorAll('.gp-item').forEach((b) => {
+      b.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const it = items[Number(b.dataset.i)];
+        closePop();
+        if (it && it.run) it.run();
+      });
+    });
+    popEl = el;
+    popKey = key || '';
+  }
+  function togglePop(anchor, key, items, title) {
+    if (popEl && popKey === key) { closePop(); return; }
+    openPop(anchor, items, title, key);
+  }
+  document.addEventListener('click', (e) => {
+    if (!popEl) return;
+    const anchor = e.target.closest ? e.target.closest('[data-pop]') : null;
+    if (!popEl.contains(e.target) && !anchor) closePop();
+  });
+  window.addEventListener('hashchange', closePop);
+
+  // 章节标题常自带「第十九章」，别和「第19章」重复显示
+  function chapterLabel(t) {
+    return String(t || '').replace(/^第[一二三四五六七八九十百千零〇0-9]+章[\s:：·]*/, '').trim() || String(t || '');
+  }
+
+  function relTime(ts) {
+    if (!ts) return '';
+    const s = Math.max(0, Date.now() / 1000 - ts);
+    if (s < 60) return '刚刚';
+    if (s < 3600) return Math.floor(s / 60) + '分钟前';
+    if (s < 86400) return Math.floor(s / 3600) + '小时前';
+    if (s < 2592000) return Math.floor(s / 86400) + '天前';
+    return Math.floor(s / 2592000) + '个月前';
+  }
+
+  const srcNameById = (id) => {
+    const p = String(id).split(':')[0];
+    const hit = Object.entries(SRC_META).find(([, v]) => v[0] === p);
+    return hit ? hit[0] : '';
+  };
+
   // ---------------------------------------------------------------- 网络
   // WKWebView(iOS) 的 fetch 连接被拒 / 复用了后台挂起前的失效连接时，
   // 抛的是 TypeError: Load failed（不是 DOMException AbortError），必须单独识别并重试。
@@ -193,9 +273,7 @@
     const p = b.progress || {};
     const pct = Math.max(0, Math.min(100, Math.round((p.ratio || 0) * 100)));
     const extra = `
-      <button class="del" data-del="${b.id}" title="移出书架">
-        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
-      </button>
+      <button class="del" data-del="${b.id}" title="移出书架">${ICONS.close}</button>
       ${p.i ? `<div class="prog"><i style="width:${pct}%"></i></div>` : ''}`;
     const sub = p.t ? `读到 ${esc(p.t)}` : '尚未开始';
     const meta = `${b.count ? `${b.count} 章 · ` : ''}${esc(b.source || '')}书源`;
@@ -207,6 +285,49 @@
         <div class="m">${meta}</div>
       </a>`;
   };
+
+  // 图 1 的横向列表排列：封面 + 作者/章节 + 已读 + 来源 + 最近阅读 + 未读角标
+  function shelfListCard(b) {
+    const p = b.progress || {};
+    const readI = Number.isFinite(p.i) ? p.i + 1 : 0;
+    const unread = b.count ? Math.max(0, b.count - readI) : 0;
+    const badge = unread
+      ? `<span class="unread ${unread >= 20 ? 'hot' : ''}">${unread > 99 ? '99+' : unread}</span>` : '';
+    const src = b.source || srcNameById(b.id) || '速读谷';
+    const ago = relTime(b.lastRead);
+    const extra = `<button class="del" data-del="${b.id}" title="移出书架">${ICONS.close}</button>
+      <span class="cv-tag">小说</span>`;
+    return `<a class="sl-card" href="#/read/${b.id}">
+      ${coverBox(b, extra)}
+      <div class="sl-body">
+        <div class="sl-title">${esc(b.title)}</div>
+        <div class="sl-line">${esc(b.author || '佚名')} · 共${b.count ? b.count + '章' : '—章'}</div>
+        <div class="sl-line">${p.t ? `已读：第${readI}章 ${esc(chapterLabel(p.t))}` : '尚未开始阅读'}</div>
+        <div class="sl-line">来源：${esc(src)}</div>
+        <div class="sl-line sl-last">${ago ? esc(ago) + ' · ' : ''}${p.t ? `第${readI}章 ${esc(chapterLabel(p.t))}` : '暂无更新'}</div>
+      </div>
+      ${badge}
+    </a>`;
+  }
+
+  // 书架工具条偏好持久化到服务端 state.settings
+  function shelfPref(k, fallback) { return state.settings[k] || fallback; }
+  function setShelfPref(k, v) {
+    state.settings[k] = v;
+    saveSettings();
+    viewShelf();
+  }
+  function wireShelfDel(root) {
+    root.querySelectorAll('[data-del]').forEach((b) => {
+      b.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        await removeShelf(b.dataset.del);
+        toast('已移出书架');
+        render();
+      });
+    });
+  }
 
   const pager = (page, pages, cb) => {
     if (pages <= 1) return '';
@@ -239,39 +360,67 @@
   // ---------------------------------------------------------------- 视图：书架
   function viewShelf() {
     setNav('shelf');
-    const books = Object.values(state.shelf).sort((a, b) => (b.lastRead || 0) - (a.lastRead || 0));
+    const mobile = window.matchMedia('(max-width: 640px)').matches;
+    const layout = shelfPref('shelfLayout', mobile ? 'list' : 'grid');
+    const sort = shelfPref('shelfSort', 'recent');
+    const filter = shelfPref('shelfFilter', 'all');
+    const all = Object.values(state.shelf);
+    let books = filter === 'all' ? all.slice()
+      : all.filter((b) => (b.source || srcNameById(b.id)) === filter);
+    books.sort((a, b) => {
+      if (sort === 'title') return String(a.title || '').localeCompare(String(b.title || ''), 'zh');
+      if (sort === 'added') return (b.added || 0) - (a.added || 0);
+      return (b.lastRead || 0) - (a.lastRead || 0);
+    });
+    const sources = [...new Set(all.map((b) => b.source || srcNameById(b.id)).filter(Boolean))];
     const body = books.length
-      ? `<div class="grid">${books.map(shelfCard).join('')}</div>`
+      ? layout === 'list'
+        ? `<div class="shelf-list">${books.map(shelfListCard).join('')}</div>`
+        : `<div class="grid">${books.map(shelfCard).join('')}</div>`
       : `<div class="empty"><div class="ic">📚</div>
            <p>书架还是空的<br>去「发现」找一本喜欢的书吧</p>
            <a class="btn" href="#/discover">去逛逛</a></div>`;
 
     view.innerHTML = `
       <div class="page">
-        <div class="page-head">
+        <div class="page-head glass-head">
           <div>
-            <h1 class="h1">我的书架</h1>
+            <h1 class="h1">书架</h1>
             <div class="sub">${books.length ? `共 ${books.length} 本 · 阅读进度自动保存` : '收藏的书会出现在这里'}</div>
           </div>
-          <a class="btn ghost ico-only" href="#/search" title="搜索" aria-label="搜索">
-            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
-          </a>
+          <div class="glass-pill shelf-tools">
+            <button class="g-text" id="shelf-filter" data-pop title="按书源筛选"><span>${filter === 'all' ? '全部' : esc(filter)}</span>${ICONS.chev}</button>
+            <i class="g-sep"></i>
+            <button class="g-ico" id="shelf-layout" title="${layout === 'list' ? '切换为网格' : '切换为列表'}">${layout === 'list' ? ICONS.grid : ICONS.list}</button>
+            <a class="g-ico" href="#/search" title="搜索" aria-label="搜索">${ICONS.search}</a>
+            <button class="g-ico" id="shelf-more" data-pop title="排序方式">${ICONS.dots}</button>
+          </div>
         </div>
         ${body}
       </div>`;
 
-    view.querySelectorAll('[data-del]').forEach((b) => {
-      b.addEventListener('click', async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        await removeShelf(b.dataset.del);
-        toast('已移出书架');
-        render();
-      });
+    $('#shelf-layout').addEventListener('click', () => {
+      setShelfPref('shelfLayout', layout === 'list' ? 'grid' : 'list');
     });
+    $('#shelf-filter').addEventListener('click', (e) => {
+      e.stopPropagation();
+      togglePop(e.currentTarget, 'shelf-filter', [
+        { label: '全部', on: filter === 'all', run: () => setShelfPref('shelfFilter', 'all') },
+        ...sources.map((s) => ({ label: s, on: filter === s, run: () => setShelfPref('shelfFilter', s) })),
+      ], '按书源筛选');
+    });
+    $('#shelf-more').addEventListener('click', (e) => {
+      e.stopPropagation();
+      togglePop(e.currentTarget, 'shelf-more', [
+        { label: '最近阅读', on: sort === 'recent', run: () => setShelfPref('shelfSort', 'recent') },
+        { label: '按书名', on: sort === 'title', run: () => setShelfPref('shelfSort', 'title') },
+        { label: '加入时间', on: sort === 'added', run: () => setShelfPref('shelfSort', 'added') },
+      ], '排序方式');
+    });
+    wireShelfDel(view);
 
     // 老条目没有章节数：借服务端的目录缓存补一次，补完刷新
-    const missing = books.filter((b) => !b.count);
+    const missing = all.filter((b) => !b.count);
     if (missing.length) {
       (async () => {
         for (const b of missing) {
@@ -287,6 +436,25 @@
         if (missing.every((b) => state.shelf[b.id]?.count)) render();
       })();
     }
+  }
+
+  // ---------------------------------------------------------------- 视图：订阅（追更）
+  function viewSub() {
+    setNav('sub');
+    const books = Object.values(state.shelf).sort((a, b) => (b.lastRead || 0) - (a.lastRead || 0));
+    view.innerHTML = `<div class="page">
+      <div class="page-head glass-head">
+        <div><h1 class="h1">订阅</h1>
+          <div class="sub">书架里正在追更的书 · ${books.length} 本</div></div>
+        <a class="g-ico" href="#/discover" title="去发现">${ICONS.search}</a>
+      </div>
+      ${books.length
+        ? `<div class="shelf-list">${books.map(shelfListCard).join('')}</div>`
+        : `<div class="empty"><div class="ic">🔖</div>
+             <p>还没有订阅的书<br>把喜欢的书加入书架就会显示在这里</p>
+             <a class="btn" href="#/discover">去发现</a></div>`}
+    </div>`;
+    wireShelfDel(view);
   }
 
   // ---------------------------------------------------------------- 视图：发现
@@ -316,234 +484,149 @@
   const ALI_RANK_TABS = [['hits_day', '日榜'], ['hits_week', '周榜'],
     ['hits_month', '月榜'], ['hits', '总榜']];
 
+  const DISC_CATS = {
+    sd: SD_DISC_CATS, qm: QM_DISC_CATS, sq: SQ_DISC_CATS, qb: QB_DISC_CATS,
+    bc: BC_DISC_CATS, bl: BL_DISC_CATS, dq: DQ_DISC_CATS, ali: ALI_DISC_CATS,
+  };
+  // 排行榜已合并进发现页：三个快捷 chip 对应各源排行榜 API 的 kind
+  const DISC_RANKS = {
+    sd: ['top', 'quanben', 'lastupdate'],
+    qm: ['hot', 'over', 'new'],
+    sq: ['boyClick', 'allEnd', 'boyStore'],
+    qb: ['all', 'goodnum', 'allvisit'],
+    bc: ['popular', 'completed', 'latest'],
+    bl: ['vote', 'goodnum', 'newbook'],
+    dq: ['allvisit', 'full', 'newhot'],
+    ali: ['hits_day', 'hits_month', 'hits_week'],
+  };
+  const RANK_API = {
+    sd: (k, p) => `/api/ranking?kind=${k}&p=${p}`,
+    qm: (k, p) => `/api/qm/ranking?kind=${k}&p=${p}`,
+    sq: (k, p) => `/api/sq/ranking?kind=${k}&p=${p}`,
+    qb: (k, p) => `/api/qb/ranking?kind=${k}&p=${p}`,
+    bc: (k, p) => `/api/bc/ranking?kind=${k}&p=${p}`,
+    bl: (k) => `/api/bl/ranking?kind=${k}`,
+    dq: (k, p) => `/api/dq/ranking?kind=${k}&p=${p}`,
+    ali: (k) => `/api/ali/ranking?kind=${k}`,
+  };
+  const CAT_API = {
+    sd: (c, p) => `/api/category?c=${encodeURIComponent(c)}&p=${p}`,
+    qm: (c, p) => `/api/qm/category?c=${encodeURIComponent(c)}&p=${p}`,
+    sq: (c, p) => `/api/sq/store?fc=${encodeURIComponent(c)}&p=${p}`,
+    qb: (c, p) => `/api/qb/sort?c=${encodeURIComponent(c)}&p=${p}`,
+    bc: (c, p) => `/api/bc/sort?c=${encodeURIComponent(c)}&p=${p}`,
+    bl: (c, p) => `/api/bl/sort?c=${encodeURIComponent(c)}&p=${p}`,
+    dq: (c, p) => `/api/dq/sort?c=${encodeURIComponent(c)}&p=${p}`,
+    ali: (c, p) => `/api/ali/sort?c=${encodeURIComponent(c)}&p=${p}`,
+  };
+
+  function discHash(src, o) {
+    const u = new URLSearchParams();
+    u.set('src', src);
+    if (o.cat != null) u.set('cat', o.cat);
+    else if (o.rank) u.set('rank', o.rank);
+    if (o.p && String(o.p) !== '1') u.set('p', o.p);
+    if (o.fresh) u.set('_', String(Date.now()));
+    return '#/discover?' + u.toString();
+  }
+
+  function discItem(b, src) {
+    const label = (DISC_SRC.find(([k]) => k === src) || ['', '速读谷'])[1];
+    const meta = [b.category, b.words].filter(Boolean).join(' ');
+    const tag = b.status && /完结|完本/.test(b.status) ? '<span class="cv-tag done">已有</span>' : '';
+    return `<a class="disc-card" href="#/book/${encodeURIComponent(b.id)}">
+      ${coverBox(b, tag)}
+      <div class="dc-body">
+        <div class="dc-title">${esc(b.title)}</div>
+        <div class="dc-author">${esc(b.author || '佚名')}</div>
+        <div class="dc-line">来源：${esc(b.source || label)}</div>
+        <div class="dc-line">${esc(meta || '网络小说')}</div>
+        <div class="dc-latest">最新：${esc(b.latest || b.status || '—')}</div>
+      </div>
+    </a>`;
+  }
+
   async function viewDiscover(q) {
     setNav('discover');
-    const src = ['qm', 'sq', 'qb', 'bc', 'bl', 'dq', 'ali'].includes(q.get('src')) ? q.get('src') : 'sd';
-    const chips = src === 'qm'
-      ? QM_DISC_CATS.map(([id, n]) => `<a class="chip" href="#/qm?c=${id}&p=1">${n}</a>`).join('') +
-        '<a class="chip" href="#/qm">全部分类</a>'
-      : src === 'sq'
-        ? SQ_DISC_CATS.map(([fc, n]) =>
-          `<a class="chip" href="#/sq${fc ? '?fc=' + encodeURIComponent(fc) : ''}">${n}</a>`).join('')
-        : src === 'qb'
-          ? QB_DISC_CATS.map(([id, n]) =>
-            `<a class="chip" href="#/qb?c=${id}&p=1">${n}</a>`).join('')
-          : src === 'bc'
-            ? BC_DISC_CATS.map(([id, n]) =>
-              `<a class="chip" href="#/bc?c=${id}&p=1">${n}</a>`).join('')
-            : src === 'bl'
-              ? BL_DISC_CATS.map(([id, n]) =>
-                `<a class="chip" href="#/bl?c=${id}&p=1">${n}</a>`).join('')
-              : src === 'dq'
-                ? DQ_DISC_CATS.map(([id, n]) =>
-                  `<a class="chip" href="#/dq?c=${id}&p=1">${n}</a>`).join('')
-                : src === 'ali'
-                  ? ALI_DISC_CATS.map(([id, n]) =>
-                    `<a class="chip" href="#/ali?c=${id}&p=1">${n}</a>`).join('')
-                  : SD_DISC_CATS.map(([id, n]) => `<a class="chip" href="#/list?c=${id}&p=1">${n}</a>`).join('') +
-          '<a class="chip" href="#/rank?kind=quanben">完结</a>' +
-          '<a class="chip" href="#/rank?kind=top">排行</a>';
-    const sub = src === 'qm' ? '七猫正版书库 · 官方榜单'
-      : src === 'sq' ? '书旗正版书库 · 官方榜单'
-        : src === 'qb' ? '全本小说网 · 分类与官方榜单'
-          : src === 'bc' ? '八叉书库 · 分类与官方榜单'
-            : src === 'bl' ? '八一中文网 · 分类与官方榜单'
-              : src === 'dq' ? '得奇小说网 · 书库与官方榜单'
-                : src === 'ali' ? '爱丽丝书屋 · 分类与人气榜（需代理）' : '速读谷 · 与站点同步';
+    const src = DISC_SRC.some(([k]) => k === q.get('src')) ? q.get('src') : 'sd';
+    const cats = DISC_CATS[src];
+    const ranks = DISC_RANKS[src];
+    const mode = q.has('cat') ? 'cat' : 'rank';
+    const cat = q.has('cat') ? q.get('cat') : cats[0][0];
+    const catName = (cats.find(([id]) => String(id) === String(cat)) || cats[0])[1];
+    const rank = ranks.includes(q.get('rank')) ? q.get('rank') : ranks[0];
+    const p = q.get('p') || '1';
+    const srcLabel = (DISC_SRC.find(([k]) => k === src) || ['', '速读谷'])[1];
+    const rankLabels = [`${catName}排行榜`, `完本${catName}小说`, `最新${catName}小说`];
 
-    view.innerHTML = `<div class="page">
-      <div class="page-head"><div><h1 class="h1">发现</h1>
-        <div class="sub">${sub}</div></div></div>
-      <div class="chips" style="margin-bottom:12px">${DISC_SRC.map(([k, n]) =>
-        `<a class="chip ${k === src ? 'on' : ''}" href="#/discover?src=${k}">${n}</a>`).join('')}</div>
-      <div class="chips">${chips}</div>
-      <div id="sections"><p class="sub" style="color:var(--muted)">正在加载…</p></div></div>`;
+    view.innerHTML = `<div class="page disc-page">
+      <div class="glass-topbar">
+        <a class="g-circle" href="#/search" title="搜索">${ICONS.search}</a>
+        <button class="g-src" id="disc-src" data-pop>${esc(srcLabel)}${ICONS.chev}</button>
+        <button class="g-circle" id="disc-refresh" title="刷新">${ICONS.refresh}</button>
+      </div>
+      <div class="cat-row">
+        <div class="cat-scroll">${cats.map(([id, n]) =>
+          `<button class="chip ${String(id) === String(cat) ? 'on' : ''}" data-cat="${esc(id)}">${esc(n)}</button>`).join('')}</div>
+        <button class="g-ico cat-all" id="disc-cats" title="全部分类">${ICONS.filter}</button>
+      </div>
+      <div class="cats-panel" id="cats-panel" hidden>${cats.map(([id, n]) =>
+        `<button class="chip ${String(id) === String(cat) ? 'on' : ''}" data-cat="${esc(id)}">${esc(n)}</button>`).join('')}</div>
+      <div class="rank-row">${ranks.map((k, i) =>
+        `<button class="chip rchip ${mode === 'rank' && k === rank ? 'on' : ''}" data-rank="${k}">${esc(rankLabels[i])}</button>`).join('')}</div>
+      <div id="disc-list" class="disc-list">
+        ${Array(4).fill('<div class="disc-skel"><div class="skel sk-cover"></div><div class="sk-lines"><i class="skel"></i><i class="skel"></i><i class="skel"></i><i class="skel"></i></div></div>').join('')}
+      </div>
+    </div>`;
+
+    view.querySelectorAll('[data-rank]').forEach((b) => b.addEventListener('click', () =>
+      go(discHash(src, { rank: b.dataset.rank }))));
+    view.querySelectorAll('[data-cat]').forEach((b) => b.addEventListener('click', () =>
+      go(discHash(src, { cat: b.dataset.cat }))));
+    $('#disc-cats').addEventListener('click', () => {
+      const panel = $('#cats-panel');
+      panel.hidden = !panel.hidden;
+    });
+    $('#disc-src').addEventListener('click', (e) => {
+      e.stopPropagation();
+      togglePop(e.currentTarget, 'disc-src', DISC_SRC.map(([k, n]) => ({
+        label: n, on: k === src, run: () => go(`#/discover?src=${k}`),
+      })), '选择书源');
+    });
+    $('#disc-refresh').addEventListener('click', () => {
+      toast('正在刷新…');
+      go(discHash(src, { rank: mode === 'rank' ? rank : null,
+        cat: mode === 'cat' ? cat : null, p, fresh: true }));
+    });
 
     const seq = ++DISC_SEQ[0];
-    const box = $('#sections');
-    const sec = (title, label, cls, srcKey, kind, data) => (data && data.books.length ? `
-      <section class="section">
-        <div class="sec-head">
-          <h2>${title}<span class="src-dot ${cls}">${label}</span></h2>
-          <a href="#/rank?src=${srcKey}&kind=${kind}">查看全部</a>
-        </div>
-        <div class="scroller">${data.books.slice(0, 12).map((b) => bookCard(b)).join('')}</div>
-      </section>` : '');
-
-    const fail = (what, e) => {
+    const box = $('#disc-list');
+    const refreshHash = () => discHash(src, {
+      rank: mode === 'rank' ? rank : null, cat: mode === 'cat' ? cat : null, p, fresh: true,
+    });
+    const failBox = (msg) => {
       if (seq !== DISC_SEQ[0]) return;
-      box.innerHTML = `<div class="fail"><p>${what}没拉下来：${esc(e.message)}</p>
-        <button class="btn ghost" id="disc-retry">重试</button></div>`;
-      $('#disc-retry').addEventListener('click', () => viewDiscover(q));
+      box.innerHTML = `<div class="fail"><p>${esc(msg)}</p>
+        <button class="btn ghost sm" id="disc-retry">重试</button></div>`;
+      $('#disc-retry').addEventListener('click', () => go(refreshHash()));
     };
-
-    if (src === 'qm') {
-      try {
-        const res = await Promise.allSettled([
-          api('/api/qm/ranking?kind=hot&p=1'),
-          api('/api/qm/ranking?kind=new&p=1'),
-          api('/api/qm/ranking?kind=over&p=1'),
-        ]);
-        if (seq !== DISC_SEQ[0]) return;
-        const [hot, nw, over] = res.map((r) => (r.status === 'fulfilled' ? r.value : null));
-        if (res.every((r) => r.status === 'rejected')) throw res[0].reason;
-        box.innerHTML =
-          sec('大热榜', '七猫', 'qm', 'qm', 'hot', hot) +
-          sec('新书榜', '七猫', 'qm', 'qm', 'new', nw) +
-          sec('完结榜', '七猫', 'qm', 'qm', 'over', over) ||
-          '<p class="muted-line">七猫榜单暂时没有内容，稍后再试。</p>';
-      } catch (e) {
-        fail('七猫内容', e);
-      }
-      return;
-    }
-
-    if (src === 'bc') {
-      try {
-        const res = await Promise.allSettled([
-          api('/api/bc/ranking?kind=popular&p=1'),
-          api('/api/bc/ranking?kind=latest&p=1'),
-          api('/api/bc/ranking?kind=completed&p=1'),
-        ]);
-        if (seq !== DISC_SEQ[0]) return;
-        const [hot, fresh, done] = res.map((r) => (r.status === 'fulfilled' ? r.value : null));
-        if (res.every((r) => r.status === 'rejected')) throw res[0].reason;
-        box.innerHTML =
-          sec('热门排行', '八叉', 'bc', 'bc', 'popular', hot) +
-          sec('最新更新', '八叉', 'bc', 'bc', 'latest', fresh) +
-          sec('完本小说', '八叉', 'bc', 'bc', 'completed', done) ||
-          '<p class="muted-line">八叉书库榜单暂时没有内容，稍后再试。</p>';
-      } catch (e) {
-        fail('八叉书库内容', e);
-      }
-      return;
-    }
-
-    if (src === 'qb') {
-      try {
-        const res = await Promise.allSettled([
-          api('/api/qb/ranking?kind=all&p=1'),
-          api('/api/qb/ranking?kind=allvisit&p=1'),
-          api('/api/qb/ranking?kind=goodnum&p=1'),
-        ]);
-        if (seq !== DISC_SEQ[0]) return;
-        const [all, click, fav] = res.map((r) => (r.status === 'fulfilled' ? r.value : null));
-        if (res.every((r) => r.status === 'rejected')) throw res[0].reason;
-        box.innerHTML =
-          sec('总排行榜', '全本网', 'qb', 'qb', 'all', all) +
-          sec('总点击榜', '全本网', 'qb', 'qb', 'allvisit', click) +
-          sec('收藏榜', '全本网', 'qb', 'qb', 'goodnum', fav) ||
-          '<p class="muted-line">全本小说网榜单暂时没有内容，稍后再试。</p>';
-      } catch (e) {
-        fail('全本小说网内容', e);
-      }
-      return;
-    }
-
-    if (src === 'dq') {
-      try {
-        const res = await Promise.allSettled([
-          api('/api/dq/ranking?kind=allvisit&p=1'),
-          api('/api/dq/ranking?kind=goodnum&p=1'),
-          api('/api/dq/ranking?kind=newhot&p=1'),
-        ]);
-        if (seq !== DISC_SEQ[0]) return;
-        const [click, fav, fresh] = res.map((r) => (r.status === 'fulfilled' ? r.value : null));
-        if (res.every((r) => r.status === 'rejected')) throw res[0].reason;
-        box.innerHTML =
-          sec('总点击榜', '得奇', 'dq', 'dq', 'allvisit', click) +
-          sec('收藏榜', '得奇', 'dq', 'dq', 'goodnum', fav) +
-          sec('新书榜', '得奇', 'dq', 'dq', 'newhot', fresh) ||
-          '<p class="muted-line">得奇小说网榜单暂时没有内容，稍后再试。</p>';
-      } catch (e) {
-        fail('得奇小说网内容', e);
-      }
-      return;
-    }
-
-    if (src === 'ali') {
-      try {
-        const res = await Promise.allSettled([
-          api('/api/ali/ranking?kind=hits_day'),
-          api('/api/ali/ranking?kind=hits_week'),
-          api('/api/ali/ranking?kind=hits_month'),
-          api('/api/ali/ranking?kind=hits'),
-        ]);
-        if (seq !== DISC_SEQ[0]) return;
-        const [day, week, month, all] = res.map((r) => (r.status === 'fulfilled' ? r.value : null));
-        if (res.every((r) => r.status === 'rejected')) throw res[0].reason;
-        box.innerHTML =
-          sec('今日热门', '爱丽丝', 'ali', 'ali', 'hits_day', day) +
-          sec('本周热门', '爱丽丝', 'ali', 'ali', 'hits_week', week) +
-          sec('本月热门', '爱丽丝', 'ali', 'ali', 'hits_month', month) +
-          sec('总榜', '爱丽丝', 'ali', 'ali', 'hits', all) ||
-          '<p class="muted-line">爱丽丝书屋榜单暂时没有内容，稍后再试。</p>';
-        // 代理只影响这个源，失败了给一句人话，别让人以为整个阅读器坏了
-        if (res.every((r) => r.status === 'rejected')) return;
-      } catch (e) {
-        fail('爱丽丝书屋内容', e);
-      }
-      return;
-    }
-
-    if (src === 'bl') {
-      try {
-        const res = await Promise.allSettled([
-          api('/api/bl/ranking?kind=vote'),
-          api('/api/bl/ranking?kind=goodnum'),
-          api('/api/bl/ranking?kind=newbook'),
-        ]);
-        if (seq !== DISC_SEQ[0]) return;
-        const [vote, fav, fresh] = res.map((r) => (r.status === 'fulfilled' ? r.value : null));
-        if (res.every((r) => r.status === 'rejected')) throw res[0].reason;
-        box.innerHTML =
-          sec('推荐榜', '八一', 'bl', 'bl', 'vote', vote) +
-          sec('收藏榜', '八一', 'bl', 'bl', 'goodnum', fav) +
-          sec('新书入库', '八一', 'bl', 'bl', 'newbook', fresh) ||
-          '<p class="muted-line">八一中文网榜单暂时没有内容，稍后再试。</p>';
-      } catch (e) {
-        fail('八一中文网内容', e);
-      }
-      return;
-    }
-
-    if (src === 'sq') {
-      try {
-        const res = await Promise.allSettled([
-          api('/api/sq/ranking?kind=boyClick&p=1'),
-          api('/api/sq/ranking?kind=boyStore&p=1'),
-          api('/api/sq/ranking?kind=allEnd&p=1'),
-        ]);
-        if (seq !== DISC_SEQ[0]) return;
-        const [click, store, done] = res.map((r) => (r.status === 'fulfilled' ? r.value : null));
-        if (res.every((r) => r.status === 'rejected')) throw res[0].reason;
-        box.innerHTML =
-          sec('男频点击榜', '书旗', 'sq', 'sq', 'boyClick', click) +
-          sec('男频收藏榜', '书旗', 'sq', 'sq', 'boyStore', store) +
-          sec('全站完结榜', '书旗', 'sq', 'sq', 'allEnd', done) ||
-          '<p class="muted-line">书旗榜单暂时没有内容，稍后再试。</p>';
-      } catch (e) {
-        fail('书旗内容', e);
-      }
-      return;
-    }
-
     try {
-      const home = await api('/api/home');
+      const url = mode === 'cat' ? CAT_API[src](cat, p) : RANK_API[src](rank, p);
+      const data = await api(url);
       if (seq !== DISC_SEQ[0]) return;
-      state.home = home;
-      const kindOf = (t) => (t.includes('完结') ? 'quanben' : t.includes('排行') ? 'top' : 'lastupdate');
-      const html = home.sections.map((s) => `
-        <section class="section">
-          <div class="sec-head">
-            <h2>${esc(s.title)}</h2>
-            <a href="#/rank?kind=${kindOf(s.title)}">查看全部</a>
-          </div>
-          <div class="scroller">${s.books.map((b) => bookCard(b)).join('')}</div>
-        </section>`).join('');
-      box.innerHTML = html || '<p>暂无内容</p>';
+      const books = (data.books || []).slice(0, 40);
+      if (!books.length) { failBox('这个栏目暂时没有内容，换个书源或刷新试试'); return; }
+      box.innerHTML =
+        (data.note ? `<p class="rank-note">${esc(data.note)}</p>` : '') +
+        books.map((b) => discItem(b, src)).join('') +
+        pager(Number(data.page || p), data.pages) +
+        `<div class="disc-all"><a href="#/rank?src=${src}&kind=${mode === 'rank' ? rank : ranks[0]}">查看完整榜单 →</a></div>`;
+      wirePager(box, (np) => go(discHash(src, {
+        rank: mode === 'rank' ? rank : null, cat: mode === 'cat' ? cat : null, p: np,
+      })));
+      view.scrollTop = 0;
     } catch (e) {
-      fail('加载', e);
+      failBox(srcLabel + '内容没拉下来：' + e.message);
     }
   }
 
@@ -599,7 +682,8 @@
     ali: ALI_RANK_TABS };
 
   async function viewRank(q) {
-    setNav('rank');
+    // 排行榜已并入「发现」，这里作为完整榜单子页，导航仍高亮发现
+    setNav('discover');
     const src = ['qm', 'sq', 'qb', 'bc', 'bl', 'dq', 'ali'].includes(q.get('src')) ? q.get('src') : 'sd';
     const tabs = RANK_TABS[src];
     let kind = q.get('kind') || tabs[0][0];
@@ -615,8 +699,9 @@
     const firstKind = { sd: 'lastupdate', qm: 'hot', sq: 'boyClick', qb: 'all', bc: 'popular', bl: 'vote', dq: 'allvisit', ali: 'hits_day' };
 
     view.innerHTML = `<div class="page">
-      <div class="page-head"><div><h1 class="h1">排行榜</h1>
-        <div class="sub">${sub}</div></div></div>
+      <div class="page-head glass-head"><div><h1 class="h1">排行榜</h1>
+        <div class="sub">${sub}</div></div>
+        <a class="chip" href="#/discover?src=${src}&rank=${kind}">← 返回发现</a></div>
       <div class="chips" style="margin-bottom:12px">${RANK_SRC.map(([k, n]) =>
         `<a class="chip ${k === src ? 'on' : ''}" href="#/rank?src=${k}&kind=${firstKind[k]}">${n}</a>`).join('')}</div>
       <div class="chips">${tabs.map(([k, n]) =>
@@ -907,33 +992,91 @@
   }
 
   // ---------------------------------------------------------------- 视图：搜索
+  const SEARCH_SOURCES = [['all', '全部书源'], ['sd', '速读谷'], ['qm', '七猫'], ['sq', '书旗'],
+    ['qb', '全本网'], ['bc', '八叉'], ['bl', '八一'], ['dq', '得奇'], ['ali', '爱丽丝']];
+  const HIST_KEY = 'sg.search.history';
+  const SEARCH_SRC_KEY = 'sg.search.src';
+
+  function getHist() {
+    try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]').filter((x) => typeof x === 'string'); }
+    catch (_) { return []; }
+  }
+  function setHist(list) {
+    try { localStorage.setItem(HIST_KEY, JSON.stringify(list.slice(0, 12))); } catch (_) { /* 隐私模式忽略 */ }
+  }
+  function pushHist(kw) {
+    setHist([kw, ...getHist().filter((x) => x !== kw)]);
+  }
+  function histHTML() {
+    const list = getHist();
+    return list.length
+      ? list.map((k) => `<button class="hist-chip" data-k="${esc(k)}"><span>${esc(k)}</span><i data-del="${esc(k)}" title="删除">${ICONS.close}</i></button>`).join('')
+      : '<p class="hist-none">还没有搜索记录</p>';
+  }
+
   function viewSearch(q) {
     setNav('search');
     const kw = q.get('q') || '';
-    const src = q.get('src') || 'all';
-    const sources = [['all', '全部书源'], ['sd', '速读谷'], ['qm', '七猫'], ['sq', '书旗'], ['qb', '全本网'], ['bc', '八叉'], ['bl', '八一'], ['dq', '得奇'], ['ali', '爱丽丝']];
-    view.innerHTML = `<div class="page">
-      <div class="page-head"><h1 class="h1">搜索</h1></div>
-      <form class="searchbar" id="sform">
-        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
-        <input id="sq" placeholder="书名、作者…（至少 2 个汉字）" value="${esc(kw)}" autocomplete="off">
-        <select id="ssrc" title="选择书源">${sources.map(([k, n]) =>
-          `<option value="${k}" ${k === src ? 'selected' : ''}>${n}</option>`).join('')}</select>
-        <button class="btn sm" type="submit">搜索</button>
-      </form>
-      <div id="sres" style="margin-top:22px">${kw ? '<p class="muted-line">搜索中…</p>' : ''}</div>
+    const src = q.get('src') || localStorage.getItem(SEARCH_SRC_KEY) || 'all';
+    try { localStorage.setItem(SEARCH_SRC_KEY, src); } catch (_) { /* 忽略 */ }
+
+    view.innerHTML = `<div class="page search-page">
+      <div class="glass-topbar">
+        <button class="g-circle" id="s-back" title="返回">${ICONS.back}</button>
+        <form class="glass-search" id="sform">
+          ${ICONS.search}
+          <input id="sq" placeholder="搜索书名、作者" value="${esc(kw)}" autocomplete="off" enterkeyhint="search">
+          <input type="hidden" id="ssrc" value="${esc(src)}">
+          ${kw ? `<button type="button" class="s-clear" id="s-clear" title="清空">${ICONS.close}</button>` : ''}
+        </form>
+        <button class="g-circle" id="s-dots" data-pop title="选择书源">${ICONS.dots}</button>
+      </div>
+      <div id="sres" class="s-res">${kw ? '<p class="muted-line">搜索中…</p>' : ''}</div>
+      <div class="hist" id="s-history" ${kw ? 'hidden' : ''}>
+        <div class="hist-head"><b>搜索历史</b><button id="hist-clear">清除</button></div>
+        <div class="hist-chips" id="hist-list">${histHTML()}</div>
+      </div>
     </div>`;
 
+    $('#s-back').addEventListener('click', () => go('#/shelf'));
+    const submit = (v) => {
+      const key = String(v || '').trim();
+      if (!key) return;
+      pushHist(key);
+      go(`#/search?src=${$('#ssrc').value}&q=${encodeURIComponent(key)}`);
+    };
     $('#sform').addEventListener('submit', (e) => {
       e.preventDefault();
-      const v = $('#sq').value.trim();
-      if (v) go(`#/search?src=${$('#ssrc').value}&q=${encodeURIComponent(v)}`);
+      submit($('#sq').value);
     });
-    $('#ssrc').addEventListener('change', (e) => {
-      const v = e.target.value;
-      go(kw ? `#/search?src=${v}&q=${encodeURIComponent(kw)}` : `#/search?src=${v}`);
+    $('#s-clear')?.addEventListener('click', () => go(`#/search?src=${$('#ssrc').value}`));
+    $('#s-dots').addEventListener('click', (e) => {
+      e.stopPropagation();
+      togglePop(e.currentTarget, 'search-src', SEARCH_SOURCES.map(([k, n]) => ({
+        label: n, on: k === $('#ssrc').value,
+        run: () => {
+          $('#ssrc').value = k;
+          try { localStorage.setItem(SEARCH_SRC_KEY, k); } catch (_) { /* 忽略 */ }
+          const v = $('#sq').value.trim();
+          go(v ? `#/search?src=${k}&q=${encodeURIComponent(v)}` : `#/search?src=${k}`);
+        },
+      })), '选择书源');
     });
-    if (kw) runSearch(kw, src);
+    $('#hist-clear').addEventListener('click', () => {
+      setHist([]);
+      $('#hist-list').innerHTML = histHTML();
+    });
+    $('#hist-list').addEventListener('click', (e) => {
+      const del = e.target.closest('[data-del]');
+      if (del) {
+        setHist(getHist().filter((x) => x !== del.dataset.del));
+        $('#hist-list').innerHTML = histHTML();
+        return;
+      }
+      const chip = e.target.closest('[data-k]');
+      if (chip) submit(chip.dataset.k);
+    });
+    if (kw) { pushHist(kw); runSearch(kw, src); }
   }
 
   async function runSearch(kw, src = 'all', fresh = false) {
@@ -1436,12 +1579,6 @@
   });
 
   // ---- 右上角加入书架按钮 ----
-  const srcNameById = (id) => {
-    const p = String(id).split(':')[0];
-    const hit = Object.entries(SRC_META).find(([, v]) => v[0] === p);
-    return hit ? hit[0] : '';
-  };
-
   const ICON_ADD = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 8.2v7.6M8.2 12h7.6"/></svg>';
   const ICON_ON = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.3 12.4l2.6 2.6 4.9-5.4"/></svg>';
 
@@ -1642,7 +1779,10 @@
     }
     if (!reader.hidden) closeReader();
     document.body.style.overflow = ''; // 阅读器使用独立滚动容器
+    // 搜索页像图 2 一样是沉浸式整页，收起底部标签栏
+    document.body.classList.toggle('no-tabbar', page === 'search');
     if (page === 'shelf') viewShelf();
+    else if (page === 'sub') viewSub();
     else if (page === 'mine') viewMine();
     else if (page === 'discover') viewDiscover(q);
     else if (page === 'list') viewList(q);
