@@ -294,8 +294,7 @@
   const shelfCard = (b, mg = false, sel = false) => {
     const p = b.progress || {};
     const pct = Math.max(0, Math.min(100, Math.round((p.ratio || 0) * 100)));
-    const extra = `${mg ? pickBox(sel) : ''}
-      ${p.i ? `<div class="prog"><i style="width:${pct}%"></i></div>` : ''}`;
+    const extra = `${p.i ? `<div class="prog"><i style="width:${pct}%"></i></div>` : ''}`;
     const sub = p.t ? `读到 ${esc(p.t)}` : '尚未开始';
     const meta = `${b.count ? `${b.count} 章 · ` : ''}${esc(b.source || '')}书源`;
     const tag = mg ? 'div' : 'a';
@@ -306,10 +305,11 @@
         <div class="t">${esc(b.title)}</div>
         <div class="s">${sub}</div>
         <div class="m">${meta}</div>
+        ${mg ? pickBox(sel) : ''}
       </${tag}>`;
   };
 
-  // 管理模式的选择圈：只在点「管理书架」后出现，替代原来卡片上的删除 ×
+  // 管理模式的选择圈：只在点「管理书架」后出现，固定在卡片右下角（99+ 角标下方）
   const pickBox = (sel) => `<span class="pick ${sel ? 'on' : ''}">${sel ? ICONS.check : ''}</span>`;
 
   // 图 1 的横向列表排列：封面 + 作者/章节 + 已读 + 来源 + 最近阅读 + 未读角标
@@ -321,7 +321,7 @@
       ? `<span class="unread ${unread >= 20 ? 'hot' : ''}">${unread > 99 ? '99+' : unread}</span>` : '';
     const src = b.source || srcNameById(b.id) || '速读谷';
     const ago = relTime(b.lastRead);
-    const extra = `${mg ? pickBox(sel) : ''}<span class="cv-tag">小说</span>`;
+    const extra = '<span class="cv-tag">小说</span>';
     const tag = mg ? 'div' : 'a';
     const attrs = mg ? `data-pick="${esc(b.id)}"` : `href="#/read/${b.id}"`;
     return `<${tag} class="sl-card ${mg ? 'manage' : ''} ${sel ? 'picked' : ''}" ${attrs}>
@@ -334,6 +334,7 @@
         <div class="sl-line sl-last">${ago ? esc(ago) + ' · ' : ''}${p.t ? `第${readI}章 ${esc(chapterLabel(p.t))}` : '暂无更新'}</div>
       </div>
       ${badge}
+      ${mg ? pickBox(sel) : ''}
     </${tag}>`;
   }
 
@@ -509,25 +510,6 @@
         if (missing.every((b) => state.shelf[b.id]?.count)) render();
       })();
     }
-  }
-
-  // ---------------------------------------------------------------- 视图：订阅（追更）
-  function viewSub() {
-    setNav('sub');
-    const books = Object.values(state.shelf).sort((a, b) => (b.lastRead || 0) - (a.lastRead || 0));
-    view.innerHTML = `<div class="page">
-      <div class="page-head glass-head">
-        <div><h1 class="h1">订阅</h1>
-          <div class="sub">书架里正在追更的书 · ${books.length} 本</div></div>
-        <a class="g-ico" href="#/discover" title="去发现">${ICONS.search}</a>
-      </div>
-      ${books.length
-        ? `<div class="shelf-list">${books.map(shelfListCard).join('')}</div>`
-        : `<div class="empty"><div class="ic">🔖</div>
-             <p>还没有订阅的书<br>把喜欢的书加入书架就会显示在这里</p>
-             <a class="btn" href="#/discover">去发现</a></div>`}
-    </div>`;
-    wireShelfDel(view);
   }
 
   // ---------------------------------------------------------------- 视图：发现
@@ -1857,7 +1839,6 @@
     // 离开书架页时退出管理模式，避免下次回来还停在勾选状态
     if (page !== 'shelf' && shelfManage) exitShelfManage();
     if (page === 'shelf') viewShelf();
-    else if (page === 'sub') viewSub();
     else if (page === 'mine') viewMine();
     else if (page === 'discover') viewDiscover(q);
     else if (page === 'list') viewList(q);
