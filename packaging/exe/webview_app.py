@@ -3,7 +3,7 @@
 用 PyInstaller 打包后是单个 exe：双击启动内置服务并弹出应用窗口，
 不依赖 Python 环境。相比 pywebview 方案，这里直接复用 Edge/Chrome 的
 --app 模式，不挑 WebView2 运行时版本，兼容老电脑。
-数据（书架/进度/缓存）保存在 exe 旁边的 data\ 目录里。
+数据（书架/进度/缓存）保存在 exe 旁边的 data/ 目录里。
 """
 import os
 import sys
