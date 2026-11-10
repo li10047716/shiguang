@@ -19,7 +19,8 @@
       '<rect width="300" height="400" fill="#e9e1d4"/>' +
       '<text x="150" y="205" font-size="20" fill="#b3a893" text-anchor="middle" font-family="sans-serif">暂无封面</text></svg>');
 
-  const img = (u) => (u ? `/api/img?u=${encodeURIComponent(u)}` : PLACEHOLDER);
+  // 本地漫画的封面是 /api/local/page?... 这种站内地址，不能再套一层 /api/img
+  const img = (u) => (!u ? PLACEHOLDER : (u.startsWith('/') ? u : `/api/img?u=${encodeURIComponent(u)}`));
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -49,6 +50,11 @@
       : typoHTML(b.title);
     return `<div class="cover" data-ch="${ch}">${inner}${extra}</div>`;
   };
+
+  // 漫画和小说在界面上只有两处差别：计量单位是「话」，以及一个类型小标
+  const isComicBook = (b) => !!b && b.kind === 'comic';
+  const unitOf = (b) => (isComicBook(b) ? '话' : '章');
+  const comicMark = (b) => (isComicBook(b) ? '<span class="type-tag">漫画</span> ' : '');
 
   // 书源显示名与徽章颜色。速读谷作为默认源，列表里不额外标注
   const SRC_META = {
@@ -157,7 +163,7 @@
     mask.className = 'glass-mask';
     mask.innerHTML = `<div class="glass-dialog input-dialog">
       <div class="gd-msg">${esc(title)}</div>
-      <input class="nd-input" maxlength="24" autocomplete="off"
+      <input class="nd-input" maxlength="${Number(opts.max) || 24}" autocomplete="off"
         placeholder="${esc(placeholder || '')}" value="${esc(opts.value || '')}">
       <div class="gd-actions">
         <button class="g-text" data-no>取消</button>
@@ -183,7 +189,7 @@
 
   // 章节标题常自带「第十九章」，别和「第19章」重复显示
   function chapterLabel(t) {
-    return String(t || '').replace(/^第[一二三四五六七八九十百千零〇0-9]+章[\s:：·]*/, '').trim() || String(t || '');
+    return String(t || '').replace(/^第[一二三四五六七八九十百千零〇0-9]+[章话回][\s:：·]*/, '').trim() || String(t || '');
   }
 
   function relTime(ts) {
@@ -253,9 +259,12 @@
   }
 
   async function importLocalBook() {
-    const f = await chooseFile('.txt,.epub,text/plain,application/epub+zip');
+    const f = await chooseFile('.txt,.epub,.cbz,.zip,text/plain,application/epub+zip,application/zip');
     if (!f) return;
-    if (f.size > 40 * 1024 * 1024) { toast('文件超过 40MB，请先拆分再导入'); return; }
+    // 漫画包几百兆很常见，纯文本 40MB 已经是天量，两个上限分开
+    const isPack = /\.(cbz|zip|epub)$/i.test(f.name);
+    const limit = isPack ? 220 * 1024 * 1024 : 40 * 1024 * 1024;
+    if (f.size > limit) { toast(`文件超过 ${limit / 1024 / 1024}MB，请先拆分再导入`); return; }
     busy(true);
     toast('正在解析，稍等…');
     try {
@@ -269,7 +278,7 @@
       const j = await r.json();
       if (j.error) throw new Error(j.error);
       if (j.shelf) state.shelf = j.shelf;
-      toast(`已导入《${j.book.title}》· ${j.book.chapters.length} 章`);
+      toast(`已导入《${j.book.title}》· ${j.book.chapters.length} ${j.book.kind === 'comic' ? '话' : '章'}`);
       viewMine();
     } catch (e) {
       toast('导入失败：' + (e && e.message || e));
@@ -522,7 +531,10 @@
   function parseHash() {
     const h = location.hash.replace(/^#\/?/, '');
     const [path, query] = h.split('?');
-    const parts = path.split('/').filter(Boolean);
+    // 书号里有冒号（mkz:217087），外部分享/粘贴的链接常被转义成 %3A，这里还原一下
+    const parts = path.split('/').filter(Boolean).map((p) => {
+      try { return decodeURIComponent(p); } catch { return p; }
+    });
     return { parts, q: new URLSearchParams(query || '') };
   }
 
@@ -589,7 +601,7 @@
     const extra = `<span class="cv-tag g-${g}">${groupName(g)}</span>` +
       `${p.i ? `<div class="prog"><i style="width:${pct}%"></i></div>` : ''}`;
     const sub = p.t ? `读到 ${esc(p.t)}` : '尚未开始';
-    const meta = `${b.count ? `${b.count} 章 · ` : ''}${esc(b.source || '')}书源`;
+    const meta = `${b.count ? `${b.count} ${unitOf(b)} · ` : ''}${esc(b.source || '')}${isComicBook(b) ? '' : '书源'}`;
     const tag = mg ? 'div' : 'a';
     const attrs = mg ? `data-pick="${esc(b.id)}"` : `href="#/read/${b.id}"`;
     return `
@@ -622,14 +634,32 @@
       ${coverBox(b, extra)}
       <div class="sl-body">
         <div class="sl-title">${esc(b.title)}</div>
-        <div class="sl-line">${esc(b.author || '佚名')} · 共${b.count ? b.count + '章' : '—章'}</div>
-        <div class="sl-line">${p.t ? `已读：第${readI}章 ${esc(chapterLabel(p.t))}` : '尚未开始阅读'}</div>
+        <div class="sl-line">${esc(b.author || '佚名')} · ${comicMark(b)}共${b.count ? b.count + unitOf(b) : '—' + unitOf(b)}</div>
+        <div class="sl-line">${p.t ? `已读：${p.t.includes('话') ? '' : `第${readI}${unitOf(b)} `}${esc(chapterLabel(p.t))}` : '尚未开始阅读'}</div>
         <div class="sl-line">来源：${esc(src)}</div>
         ${tags.length ? `<div class="sl-tags">${tags.slice(0, 4).map((t) => `<span class="sl-tag">#${esc(t)}</span>`).join('')}</div>` : ''}
       </div>
       ${badge}
       ${mg ? pickBox(sel) : ''}
     </${tag}>`;
+  }
+
+  // 在线漫画：站上的搜索 / 分类接口都要登录签名，只能按作品地址添加
+  function addOnlineComic() {
+    askInput('粘贴漫画作品链接', 'https://www.mkzhan.com/217087/', async (v) => {
+      let b = null;
+      try {
+        b = await post('/api/comic/open', { url: v });
+      } catch (e) {
+        toast('没认出这本漫画：' + (e && e.message || e));
+        return;
+      }
+      if (!b || !b.id) { toast('没认出这本漫画'); return; }
+      bookCache.set(b.id, b);
+      await addShelf(b);
+      toast(`已加入书架：${b.title}`);
+      go(`#/read/${b.id}`);
+    }, { max: 220, okLabel: '添加' });
   }
 
   // 书架工具条偏好持久化到服务端 state.settings
@@ -899,6 +929,7 @@
           toast(state.settings.autoPrefetch ? '已开启后台预取' : '已关闭后台预取');
         } },
         { sep: true },
+        { label: '添加在线漫画', run: addOnlineComic },
         { label: shelfManage ? '退出管理' : '管理书架', run: () => {
           if (shelfManage) exitShelfManage();
           else { shelfManage = true; shelfPicked.clear(); }
@@ -1817,11 +1848,11 @@
         <div class="detail-main">
           ${coverBox(b)}
           <div class="detail-info">
-            <h1>${esc(b.title)}</h1>
+            <h1>${comicMark(b)}${esc(b.title)}</h1>
             <div class="tags">
               ${b.category ? `<span class="tag">${esc(b.category)}</span>` : ''}
               ${b.status ? `<span class="tag">${esc(b.status)}</span>` : ''}
-              <span class="tag">${chapters.length} 章</span>
+              <span class="tag">${chapters.length} ${unitOf(b)}</span>
               ${b.words ? `<span class="tag">${esc(b.words)}</span>` : ''}
               ${b.updated && b.source !== '七猫' ? `<span class="tag">更新 ${esc(b.updated)}</span>` : ''}
               <span class="tag src">${isLocalBook(b.id) ? '本地导入' : `${esc(b.source || '速读谷')}书源`}</span>
@@ -1829,9 +1860,11 @@
             <div class="who">作者：<b>${esc(b.author || '佚名')}</b>
               ${b.publisher ? `<span class="who-src">版权方：${esc(b.publisher)}</span>` : ''}</div>
             <div class="actions">
-              <button class="btn" id="b-read">${p && p.i ? `继续阅读 · ${esc(p.t || '')}` : '开始阅读'}</button>
+              <button class="btn" id="b-read">${p && p.i
+                ? `${isComicBook(b) ? '继续看' : '继续阅读'} · ${esc(p.t || '')}`
+                : (isComicBook(b) ? '开始看' : '开始阅读')}</button>
               <button class="btn ghost ${on ? 'on' : ''}" id="b-shelf">${on ? '已在书架' : '加入书架'}</button>
-              ${isLocalBook(b.id) ? '' : `<button class="btn ghost ico-only" id="b-more" data-pop title="更多" aria-label="更多">${ICONS.dots}</button>`}
+              ${isLocalBook(b.id) || isComicBook(b) ? '' : `<button class="btn ghost ico-only" id="b-more" data-pop title="更多" aria-label="更多">${ICONS.dots}</button>`}
             </div>
           </div>
         </div>
@@ -1844,7 +1877,7 @@
       </div>
 
       <div class="toc-box">
-        <div class="toc-head"><h3>目录</h3><span>共 ${chapters.length} 章</span></div>
+        <div class="toc-head"><h3>目录</h3><span>共 ${chapters.length} ${unitOf(b)}</span></div>
         <div class="toc-list" id="toc-preview">
           ${preview.map((c, i) => `<a href="#/read/${b.id}/${i}" class="${p && p.u === c.u ? 'read' : ''}">
             <i>${i + 1}</i><span>${esc(c.t)}</span></a>`).join('')}
@@ -1896,10 +1929,12 @@
     book: null, chapters: [], index: 0, chapter: null, saveTimer: null, lastSave: 0,
     page: 1, pages: 1, pw: 0, // 分页状态：当前页 / 总页数 / 页宽
     sec: 0, chNew: false, clock: null, // 阅读计时（秒）/ 是否刚换章
+    // 漫画：一话是一组图片，cpage 是当前页。autoScroll 由首图比例判断（条漫还是页漫）
+    kind: 'novel', cimgs: [], cpage: 0, autoScroll: false,
   };
 
   const rEl = {
-    scroll: $('#r-scroll'), article: $('#r-article'), end: $('#r-end'),
+    scroll: $('#r-scroll'), article: $('#r-article'), end: $('#r-end'), pages: $('#r-pages'),
     pct: $('#r-pct'), page: $('#r-page'), slider: $('#r-slider'),
     drawer: $('#r-drawer'),
     toc: $('#toc-list'), set: $('#r-set'), prev: $('#r-prev'), next: $('#r-next'),
@@ -1908,6 +1943,278 @@
 
   // ---- 分页布局：正文横向分栏，每栏一页 ----
   // 两种阅读模式：page = 左右分栏翻页（默认）；scroll = 上下连续滚动
+  // ---- 漫画：一话是一串图片，页漫一次一张，条漫整话竖排 ----
+  const isComic = () => R.kind === 'comic';
+  // auto 按首图比例判断（长条图就是条漫），也能在设置里强制
+  const comicMode = () => {
+    const m = state.settings.comicMode || 'auto';
+    if (m === 'page' || m === 'scroll') return m;
+    return R.autoScroll ? 'scroll' : 'page';
+  };
+  const comicRtl = () => state.settings.comicDir === 'rtl';
+
+  // 页漫缩放：双击/捏合放大后可以拖动
+  const z = { s: 1, x: 0, y: 0 };
+  function applyZoom() {
+    const img = rEl.pages.querySelector('.cp-img');
+    if (!img) return;
+    img.style.transform = z.s === 1 ? ''
+      : `translate(${z.x}px, ${z.y}px) scale(${z.s})`;
+    img.classList.toggle('zoomed', z.s !== 1);
+  }
+  function resetZoom() { z.s = 1; z.x = 0; z.y = 0; applyZoom(); }
+  function clampPan() {
+    const img = rEl.pages.querySelector('.cp-img');
+    if (!img || z.s <= 1) { z.x = 0; z.y = 0; return; }
+    const w = img.clientWidth || rEl.pages.clientWidth;
+    const h = img.clientHeight || rEl.pages.clientHeight;
+    const mx = (w * (z.s - 1)) / 2 + 20;
+    const my = (h * (z.s - 1)) / 2 + 20;
+    z.x = Math.min(mx, Math.max(-mx, z.x));
+    z.y = Math.min(my, Math.max(-my, z.y));
+  }
+
+  // 首图先量一下比例，决定这一本默认是条漫还是页漫
+  function probeComic(url) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      let done = false;
+      const finish = (scroll) => {
+        if (done) return;
+        done = true;
+        R.autoScroll = scroll;
+        resolve();
+      };
+      const timer = setTimeout(() => finish(false), 7000);
+      img.onload = () => {
+        clearTimeout(timer);
+        finish(img.naturalHeight > img.naturalWidth * 1.55);
+      };
+      img.onerror = () => { clearTimeout(timer); finish(false); };
+      img.src = url;
+    });
+  }
+
+  function retryComicImg(img, url) {
+    const n = Number(img.dataset.try || 0);
+    const again = url + (url.includes('?') ? '&' : '?') + 'r=' + Date.now();
+    if (n >= 2) {
+      const tip = rEl.pages.querySelector('.cp-tip');
+      if (tip) {
+        tip.hidden = false;
+        tip.style.pointerEvents = 'auto';
+        tip.innerHTML = '这一页没加载出来<br><span style="opacity:.7">点这里重试</span>';
+        tip.onclick = () => {
+          img.dataset.try = '0';
+          tip.hidden = true;
+          img.src = url + (url.includes('?') ? '&' : '?') + 'r=' + Date.now();
+        };
+      }
+      return;
+    }
+    img.dataset.try = String(n + 1);
+    setTimeout(() => { img.src = again; }, 500 * (n + 1));
+  }
+
+  function preloadComic() {
+    [R.cpage + 1, R.cpage + 2].forEach((i) => {
+      const u = R.cimgs[i];
+      if (u) { const im = new Image(); im.src = u; }
+    });
+  }
+
+  function renderComicPage(dir) {
+    rEl.pages.hidden = false;
+    rEl.pages.dataset.mode = 'page';
+    const url = R.cimgs[R.cpage];
+    // 右起翻页时，往后翻的动画方向要反过来
+    const back = comicRtl() ? -(dir || 0) : (dir || 0);
+    const cls = back > 0 ? ' in-l' : (back < 0 ? ' in-r' : '');
+    rEl.pages.innerHTML =
+      `<div class="cp-slide${cls}"><img class="cp-img" alt="" draggable="false"></div>
+       <div class="cp-badge">${R.cpage + 1} / ${R.cimgs.length}</div>
+       <div class="cp-tip" hidden></div>`;
+    const img = rEl.pages.querySelector('.cp-img');
+    img.addEventListener('error', () => retryComicImg(img, url));
+    img.src = url;
+    resetZoom();
+    preloadComic();
+  }
+
+  function renderComicScroll() {
+    rEl.pages.hidden = false;
+    rEl.pages.dataset.mode = 'scroll';
+    rEl.pages.innerHTML = R.cimgs.map((u, i) =>
+      `<img class="cp-img" data-i="${i}" alt="" draggable="false"
+        loading="${i < 3 ? 'eager' : 'lazy'}" src="${esc(u)}">`).join('');
+    requestAnimationFrame(() => {
+      const el = rEl.pages.querySelector(`img[data-i="${R.cpage}"]`);
+      if (el && R.cpage > 0) rEl.pages.scrollTop = el.offsetTop;
+      updatePos();
+    });
+  }
+
+  function renderComic(page, dir) {
+    if (!R.cimgs.length) return;
+    R.cpage = Math.min(R.cimgs.length - 1, Math.max(0, page | 0));
+    if (comicMode() === 'scroll') renderComicScroll();
+    else renderComicPage(dir || 0);
+    updatePos();
+  }
+
+  // 条漫滚动时反推「现在是第几页」，用于页码与进度
+  function comicPageFromScroll() {
+    const imgs = rEl.pages.querySelectorAll('img[data-i]');
+    if (!imgs.length) return;
+    const mid = rEl.pages.scrollTop + rEl.pages.clientHeight * 0.45;
+    let idx = 0;
+    for (const el of imgs) {
+      if (el.offsetTop <= mid) idx = Number(el.dataset.i);
+      else break;
+    }
+    R.cpage = idx;
+  }
+
+  function comicNext() {
+    if (rEl.pages.dataset.mode === 'scroll') {
+      const el = rEl.pages;
+      const max = el.scrollHeight - el.clientHeight;
+      if (el.scrollTop >= max - 6) { loadComicChapter(R.index + 1, 0); return; }
+      el.scrollTo({ top: Math.min(max, el.scrollTop + el.clientHeight * 0.9), behavior: 'smooth' });
+      return;
+    }
+    if (R.cpage < R.cimgs.length - 1) {
+      R.cpage += 1;
+      renderComicPage(1);
+      updatePos();
+      saveProgress();
+    } else {
+      loadComicChapter(R.index + 1, 0);
+    }
+  }
+
+  function comicPrev() {
+    if (rEl.pages.dataset.mode === 'scroll') {
+      const el = rEl.pages;
+      if (el.scrollTop <= 4) { if (R.index > 0) loadComicChapter(R.index - 1, 'last'); return; }
+      el.scrollTo({ top: Math.max(0, el.scrollTop - el.clientHeight * 0.9), behavior: 'smooth' });
+      return;
+    }
+    if (R.cpage > 0) {
+      R.cpage -= 1;
+      renderComicPage(-1);
+      updatePos();
+      saveProgress();
+    } else if (R.index > 0) {
+      loadComicChapter(R.index - 1, 'last');
+    }
+  }
+
+  async function loadComicChapter(i, restore) {
+    if (!R.chapters.length) return;
+    if (i < 0) i = 0;
+    if (i >= R.chapters.length) { toast('已经是最后一话了'); return; }
+    R.index = i;
+    const c = R.chapters[i];
+    R.cimgs = [];
+    R.cpage = 0;
+    rEl.pages.hidden = false;
+    rEl.pages.dataset.mode = 'page';
+    rEl.pages.innerHTML = '<div class="cp-tip">正在加载这一话…</div>';
+    resetZoom();
+    let data;
+    try {
+      data = await api(`/api/chapter?u=${encodeURIComponent(c.u)}`);
+    } catch (e) {
+      rEl.pages.innerHTML = `<div class="cp-tip">这一话没能加载出来<br>
+        <span style="font-size:12px;opacity:.75">${esc(e.message || '')}</span><br>
+        <button class="btn ghost sm" id="cp-retry">重试</button></div>`;
+      $('#cp-retry')?.addEventListener('click', () => loadComicChapter(i, restore));
+      return;
+    }
+    if (data.kind !== 'comic' || !(data.pages || []).length) {
+      rEl.pages.innerHTML = '<div class="cp-tip">这一话没有可显示的图片</div>';
+      return;
+    }
+    R.chapter = data;
+    R.cimgs = data.pages;
+    R.chNew = true;
+    await probeComic(R.cimgs[0]);
+    let page = 0;
+    if (restore === 'last') page = R.cimgs.length - 1;
+    else if (Number.isFinite(restore)) page = restore | 0;
+    renderComic(page, 0);
+    saveProgress(true);
+  }
+
+  // 条漫滚动：更新页码 + 节流落盘
+  let comicScrollTimer = null;
+  rEl.pages.addEventListener('scroll', () => {
+    if (!isComic() || rEl.pages.dataset.mode !== 'scroll') return;
+    comicPageFromScroll();
+    updatePos();
+    clearTimeout(comicScrollTimer);
+    comicScrollTimer = setTimeout(() => saveProgress(), 800);
+  }, { passive: true });
+
+  // 双击放大 / 还原（页漫）
+  rEl.pages.addEventListener('dblclick', (e) => {
+    if (!isComic() || rEl.pages.dataset.mode !== 'page') return;
+    e.preventDefault();
+    if (z.s > 1) resetZoom();
+    else { z.s = 2.2; clampPan(); applyZoom(); }
+  });
+
+  // 双指捏合缩放 + 放大后单指拖动
+  let pinch = { on: false, dist: 0, s: 1, x: 0, y: 0 };
+  const touchDist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  rEl.pages.addEventListener('touchstart', (e) => {
+    if (!isComic() || rEl.pages.dataset.mode !== 'page') return;
+    if (e.touches.length === 2) {
+      pinch.on = true;
+      pinch.dist = touchDist(e.touches);
+      pinch.s = z.s;
+      pinch.x = z.x;
+      pinch.y = z.y;
+    } else if (e.touches.length === 1 && z.s > 1) {
+      pinch.on = true;
+      pinch.dist = 0;
+      pinch.x = e.touches[0].clientX;
+      pinch.y = e.touches[0].clientY;
+    }
+  }, { passive: true });
+  rEl.pages.addEventListener('touchmove', (e) => {
+    if (!isComic() || !pinch.on) return;
+    if (e.touches.length === 2 && pinch.dist) {
+      const s = Math.min(4, Math.max(1, pinch.s * (touchDist(e.touches) / pinch.dist)));
+      z.s = s;
+      if (s === 1) { z.x = 0; z.y = 0; }
+      clampPan();
+      applyZoom();
+      e.preventDefault();
+    } else if (e.touches.length === 1 && z.s > 1) {
+      const dx = e.touches[0].clientX - pinch.x;
+      const dy = e.touches[0].clientY - pinch.y;
+      pinch.x = e.touches[0].clientX;
+      pinch.y = e.touches[0].clientY;
+      z.x += dx;
+      z.y += dy;
+      clampPan();
+      applyZoom();
+      e.preventDefault();
+    }
+  }, { passive: false });
+  ['touchend', 'touchcancel'].forEach((ev) => {
+    rEl.pages.addEventListener(ev, (e) => {
+      if (e.touches.length === 0) pinch.on = false;
+      else if (e.touches.length === 1 && z.s > 1) {
+        pinch.x = e.touches[0].clientX;
+        pinch.y = e.touches[0].clientY;
+        pinch.dist = 0;
+      }
+    }, { passive: true });
+  });
+
   const isScroll = () => (state.settings.readMode || 'page') === 'scroll';
   const scrollMax = () => Math.max(0, rEl.scroll.scrollHeight - rEl.scroll.clientHeight);
   function scrollRatio() {
@@ -1983,10 +2290,12 @@
   }
 
   function nextPage() {
+    if (isComic()) { comicNext(); return; }
     if (R.page < R.pages) goToPage(R.page + 1);
     else loadChapter(R.index + 1);
   }
   function prevPage() {
+    if (isComic()) { comicPrev(); return; }
     if (R.page > 1) goToPage(R.page - 1);
     else if (R.index > 0) loadChapter(R.index - 1, 1); // 回到上一章末页
   }
@@ -2008,6 +2317,7 @@
     if (s.lh) reader.style.setProperty('--r-lh', s.lh);
     if (s.w) reader.style.setProperty('--r-width', s.w + 'px');
     reader.dataset.rtheme = s.theme || 'paper';
+    reader.dataset.kind = isComic() ? 'comic' : 'novel';
     reader.dataset.mode = isScroll() ? 'scroll' : 'page';
     rEl.article.dataset.font = s.font || 'serif';
     $('#fs-val').textContent = s.fs || 19;
@@ -2015,7 +2325,9 @@
     $('#set-w').value = s.w || 720;
     document.querySelectorAll('#set-font button').forEach((b) => b.classList.toggle('on', (s.font || 'serif') === b.dataset.font));
     document.querySelectorAll('#set-theme button').forEach((b) => b.classList.toggle('on', (s.theme || 'paper') === b.dataset.theme));
-    document.querySelectorAll('#set-mode button').forEach((b) => b.classList.toggle('on', (s.readMode || 'page') === b.dataset.mode));
+    const modeNow = isComic() ? comicMode() : (s.readMode || 'page');
+    document.querySelectorAll('#set-mode button').forEach((b) => b.classList.toggle('on', modeNow === b.dataset.mode));
+    document.querySelectorAll('#set-dir button').forEach((b) => b.classList.toggle('on', (s.comicDir || 'ltr') === b.dataset.dir));
   }
 
   function setSetting(k, v) {
@@ -2049,6 +2361,12 @@
       R.book = await api(`/api/book?id=${encodeURIComponent(bookId)}`);
       bookCache.set(bookId, R.book);
       updateShelfBtn();
+      R.kind = R.book.kind === 'comic' ? 'comic' : 'novel';
+      reader.dataset.kind = R.kind;
+      const unit = R.kind === 'comic' ? '话' : '章';
+      rEl.prev.textContent = '上一' + unit;
+      rEl.next.textContent = '下一' + unit;
+      $('#toc-filter').placeholder = '跳转到第几' + unit + '…';
       R.chapters = R.book.chapters || [];
       const p = state.progress[bookId];
       let i = index != null ? Number(index) : (p && p.i != null ? p.i : 0);
@@ -2062,7 +2380,12 @@
         localStorage.setItem('uiHint', '1');
         setTimeout(() => toast('点屏幕中间呼出菜单，两侧点击翻页'), 900);
       }
+      const sameCh = p && p.u === R.chapters[i]?.u;
+      if (R.kind === 'comic') {
+        await loadComicChapter(i, sameCh && Number.isFinite(p.pg) ? p.pg : 0);
+      } else {
         await loadChapter(i, index == null && p && p.u === R.chapters[i]?.u ? p.ratio : 0);
+      }
       startClock();
       // 打开这本书就算看过更新了，顺手清掉书架上的 +N 章
       if (state.shelf[bookId] && state.shelf[bookId].newCh) {
@@ -2070,7 +2393,8 @@
         delete state.shelf[bookId].updAt;
         post('/api/shelf', { op: 'seen', book: { id: bookId } }).catch(() => {});
       }
-      startPrefetch(bookId, i, 10);   // 打开就补当前章往后 10 章
+      // 漫画没有正文可预取，图片由前端按页预加载
+      if (R.kind !== 'comic') startPrefetch(bookId, i, 10);
     } catch (e) {
       toast('打开失败：' + e.message);
       reader.hidden = true;
@@ -2080,6 +2404,7 @@
   }
 
   async function loadChapter(i, restoreRatio = 0) {
+    if (isComic()) return loadComicChapter(i, 0);
     if (!R.chapters.length) return;
     if (i < 0) i = 0;
     if (i >= R.chapters.length) { toast('已经是最后一章了'); return; }
@@ -2253,6 +2578,19 @@
     const i = R.index, n = R.chapters.length;
     rEl.prev.disabled = i <= 0;
     rEl.next.disabled = i >= n - 1;
+    if (isComic()) {
+      const total = R.cimgs.length || 1;
+      rEl.pct.textContent = `${Math.round(((i + 1) / Math.max(1, n)) * 100)}%`;
+      rEl.page.textContent = `${Math.min(total, R.cpage + 1)} / ${total}`;
+      const el = rEl.pages;
+      const ratio = rEl.pages.dataset.mode === 'scroll'
+        ? (el.scrollHeight - el.clientHeight > 0
+          ? Math.min(1, Math.max(0, el.scrollTop / (el.scrollHeight - el.clientHeight)))
+          : 0)
+        : (total > 1 ? R.cpage / (total - 1) : 0);
+      if (document.activeElement !== rEl.slider) rEl.slider.value = Math.round(ratio * 1000);
+      return;
+    }
     // 左下角：全书进度百分比
     const pct = Math.round(((i + 1) / Math.max(1, n)) * 100);
     rEl.pct.textContent = `${pct}%`;
@@ -2279,6 +2617,14 @@
   });
 
   function currentRatio() {
+    if (isComic()) {
+      if (rEl.pages.dataset.mode === 'scroll') {
+        const el = rEl.pages;
+        const max = el.scrollHeight - el.clientHeight;
+        return max > 0 ? Math.min(1, Math.max(0, el.scrollTop / max)) : 0;
+      }
+      return R.cimgs.length > 1 ? R.cpage / (R.cimgs.length - 1) : 0;
+    }
     if (isScroll()) return scrollRatio();
     return R.pages > 1 ? (R.page - 1) / (R.pages - 1) : 1;
   }
@@ -2294,7 +2640,8 @@
         bookId: R.book.id, u: R.chapter.url || R.chapters[R.index]?.u,
         t: R.chapter.title || R.chapters[R.index]?.t, i: R.index,
         n: R.chapters.length, ratio: currentRatio(), sec, chNew,
-        title: R.book.title || '',
+        title: R.book.title || '', kind: R.kind,
+        ...(isComic() ? { pg: R.cpage, pages: R.cimgs.length } : {}),
       };
       state.progress[R.book.id] = { ...payload, ts: Date.now() / 1000 };
       if (state.shelf[R.book.id]) {
@@ -2444,8 +2791,11 @@
     menu.hidden = !menu.hidden;
     if (!menu.hidden) {
       const local = isLocalBook(R.book?.id);
-      $('#r-menu-dl').hidden = local;    // 本地书不用下载，也不用换源
-      $('#r-menu-src').hidden = local;
+      const comic = R.book?.kind === 'comic';
+      // 本地书不用下载也不用换源；漫画没有「本书下载」和换源，书签按段落存，也不适用
+      $('#r-menu-dl').hidden = local || comic;
+      $('#r-menu-src').hidden = local || comic;
+      $('#r-menu-mark').hidden = comic;
       updateMarkBtn();
       if (!local) {
         dlPrev = 'none';
@@ -2551,6 +2901,14 @@
     if (isScroll()) { toggleUI(); return; }
     const rect = rEl.scroll.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
+    if (isComic()) {
+      // 右起翻页时左右两块的功能互换；条漫下就是滚一屏
+      const rtl = comicRtl() && rEl.pages.dataset.mode === 'page';
+      if (x < 0.3) { if (rtl) comicNext(); else comicPrev(); }
+      else if (x > 0.7) { if (rtl) comicPrev(); else comicNext(); }
+      else toggleUI();
+      return;
+    }
     if (x < 0.3) prevPage();
     else if (x > 0.7) nextPage();
     else toggleUI();
@@ -2560,6 +2918,7 @@
   let wheelLock = 0;
   rEl.scroll.addEventListener('wheel', (e) => {
     if (isScroll()) return;
+    if (isComic() && rEl.pages.dataset.mode === 'scroll') return;  // 条漫让浏览器自己滚
     e.preventDefault();
     const now = Date.now();
     if (now - wheelLock < 260) return;
@@ -2582,12 +2941,15 @@
     tX = e.touches[0].clientX; tY = e.touches[0].clientY;
   }, { passive: true });
   rEl.scroll.addEventListener('touchend', (e) => {
+    if (isComic() && z.s > 1) return;   // 放大状态是在拖图，不是翻页
     if (isScroll()) return;
     const dx = e.changedTouches[0].clientX - tX;
     const dy = e.changedTouches[0].clientY - tY;
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
       swiped = true;
-      if (dx < 0) nextPage(); else prevPage();
+      const rtl = isComic() && comicRtl() && rEl.pages.dataset.mode === 'page';
+      if (dx < 0) { if (rtl) prevPage(); else nextPage(); }
+      else { if (rtl) nextPage(); else prevPage(); }
     }
   }, { passive: true });
 
@@ -2613,7 +2975,26 @@
     b.addEventListener('click', () => setSetting('font', b.dataset.font));
   });
   document.querySelectorAll('#set-mode button').forEach((b) => {
-    b.addEventListener('click', () => setSetting('readMode', b.dataset.mode));
+    b.addEventListener('click', () => {
+      // 小说切排版模式，漫画切「页漫 / 条漫」，两者互不干扰
+      if (isComic()) {
+        const at = R.cpage;
+        state.settings.comicMode = b.dataset.mode;
+        applySettings();
+        saveSettings();
+        renderComic(at, 0);
+        saveProgress();
+      } else {
+        setSetting('readMode', b.dataset.mode);
+      }
+    });
+  });
+  document.querySelectorAll('#set-dir button').forEach((b) => {
+    b.addEventListener('click', () => {
+      state.settings.comicDir = b.dataset.dir;
+      applySettings();
+      saveSettings();
+    });
   });
   document.querySelectorAll('#set-theme button').forEach((b) => {
     b.addEventListener('click', () => setSetting('theme', b.dataset.theme));
@@ -2898,8 +3279,8 @@
   function renderLocal(box, books) {
     if (!books.length) {
       box.innerHTML = `<div class="mine-card glass-card">
-        <div class="mc-head"><b>本地书</b><span class="mc-sub">TXT / EPUB</span></div>
-        <p class="mc-empty">点上面「导入本地书」，断网也能读</p>
+        <div class="mc-head"><b>本地书</b><span class="mc-sub">TXT / EPUB / CBZ</span></div>
+        <p class="mc-empty">点上面「导入本地书」，小说和漫画都能加，断网也能读</p>
       </div>`;
       return;
     }
@@ -2909,7 +3290,7 @@
         <span class="mk-tag loc">本地</span>
         <div class="mk-main">
           <div class="mk-title">${esc(b.title)}</div>
-          <div class="mk-sub">${esc(b.author || '佚名')} · ${b.count} 章</div>
+          <div class="mk-sub">${esc(b.author || '佚名')} · ${b.count} ${unitOf(b)}</div>
         </div>
         <button class="mk-go" data-local-go="${esc(b.id)}">阅读</button>
         <button class="mk-del" data-local-del="${esc(b.id)}" title="删除">${ICONS.close}</button>

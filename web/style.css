@@ -508,6 +508,8 @@ a { color: inherit; text-decoration: none; }
 
 .r-drawer {
   position: absolute; top: 0; bottom: 0; left: 0; width: 400px; max-width: 84vw;
+  /* 漫画的全屏图片层是 z-index:1，抽屉要压在它上面才看得见 */
+  z-index: 10;
   background: var(--r-panel); border-right: 1px solid var(--r-line);
   display: flex; flex-direction: column; box-shadow: 16px 0 40px rgba(40, 25, 10, .12);
   animation: slideIn .22s ease;
@@ -529,6 +531,8 @@ a { color: inherit; text-decoration: none; }
 
 .r-set {
   position: absolute; left: calc(50% - 144px); bottom: 150px; width: 288px;
+  /* 漫画的 .r-pages 是 z-index:1 的全屏层，面板必须压在它上面，否则看不见也点不到 */
+  z-index: 9;
   background: var(--r-panel); border: 1px solid var(--r-line); border-radius: 14px;
   padding: 16px; box-shadow: var(--shadow-l); display: grid; gap: 14px;
   animation: popIn .16s ease;
@@ -1552,3 +1556,89 @@ html[data-theme="dark"] .mk-del:hover { background: rgba(226, 104, 92, .18); col
 }
 .mc-more:hover { background: var(--accent-soft); }
 .pull-tip { color: var(--ink-2); }
+
+/* ================================================================
+   漫画阅读器
+   页漫：一屏一张图，左右翻；条漫：整话竖着排，原生滚动。
+   两种都放在 #r-pages 里，靠 data-mode 区分。
+   ================================================================ */
+.reader[data-kind="comic"] {
+  --r-bg: #101216; --r-ink: #d7dbe2; --r-sub: #8b93a0;
+  --r-panel: #1b1f26; --r-line: #2b313a;
+}
+.reader[data-kind="comic"] .r-article,
+.reader[data-kind="comic"] .r-end { display: none; }
+
+.r-pages { position: absolute; inset: 0; z-index: 1; }
+.r-pages[hidden] { display: none; }
+
+/* 页漫：图片居中，黑边由背景吃掉 */
+.r-pages[data-mode="page"] {
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; touch-action: none;
+}
+.r-pages[data-mode="page"] .cp-slide {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  box-sizing: border-box;
+}
+.cp-img {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain;
+  user-select: none; -webkit-user-drag: none;
+  transform-origin: center center;
+  transition: transform .2s cubic-bezier(.22, .61, .36, 1);
+  will-change: transform;
+}
+.cp-img.zoomed { transition: none; }
+
+/* 条漫：整话连续排，容器自己滚 */
+.r-pages[data-mode="scroll"] {
+  overflow-y: auto; overflow-x: hidden; height: 100%;
+  -webkit-overflow-scrolling: touch; touch-action: pan-y;
+  background: #0d0f13;
+}
+.r-pages[data-mode="scroll"] .cp-img {
+  display: block; width: 100%; max-width: 100%; height: auto;
+  margin: 0 auto; background: #14171c;
+  transition: none;
+}
+
+/* 换页时的一点位移感：按翻页方向滑入 */
+@keyframes cpInL { from { opacity: .3; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+@keyframes cpInR { from { opacity: .3; transform: translateX(-28px); } to { opacity: 1; transform: none; } }
+.r-pages[data-mode="page"] .cp-slide.in-l { animation: cpInL .2s ease; }
+.r-pages[data-mode="page"] .cp-slide.in-r { animation: cpInR .2s ease; }
+
+/* 页角页码 / 加载失败提示 */
+.cp-tip {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  font-size: 13px; color: var(--r-sub); text-align: center;
+  line-height: 1.9; pointer-events: none;
+}
+.cp-tip .btn { pointer-events: auto; margin-top: 10px; }
+.cp-badge {
+  position: absolute; right: 12px; bottom: 12px; z-index: 3;
+  padding: 2px 9px; border-radius: 999px;
+  background: rgba(20, 24, 30, .72); color: #cfd6e0;
+  font-size: 11.5px; font-variant-numeric: tabular-nums;
+  pointer-events: none; opacity: 0; transition: opacity .2s;
+}
+.reader.ui-hidden .cp-badge { opacity: 1; }
+
+/* 漫画下用不到排版设置，隐藏；翻页方向只对漫画显示 */
+.reader[data-kind="comic"] #set-fs-row,
+.reader[data-kind="comic"] #set-lh-row,
+.reader[data-kind="comic"] #set-w-row,
+.reader[data-kind="comic"] #set-font-row,
+.reader[data-kind="comic"] #set-theme-row { display: none; }
+.reader:not([data-kind="comic"]) #set-dir-row { display: none; }
+
+/* 书架/详情页上的「漫画」小标 */
+.type-tag {
+  font-size: 10.5px; padding: 1px 6px; border-radius: 5px;
+  background: rgba(240, 154, 74, .16); color: #c97a2c;
+  white-space: nowrap;
+}
+html[data-theme="dark"] .type-tag { background: rgba(240, 154, 74, .2); color: #f0b06a; }

@@ -14,7 +14,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from html import unescape
 
-from . import ali, bc, blxs, dq, qbxs, qm, shuqi
+from . import ali, bc, blxs, dq, mkz, qbxs, qm, shuqi
 
 BASE = "https://www.sudugu.cc"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -514,6 +514,8 @@ def _chapter_list(html):
 
 def book(url_or_id):
     v = str(url_or_id or "").strip()
+    if mkz.is_mkz(v):
+        return mkz.book(v)
     if qm.is_qm(v):
         return qm.book(v)
     if shuqi.is_sq(v):
@@ -596,7 +598,9 @@ def parse_chapter(html, url=None):
 
 
 def chapter(url):
-    """抓取整章：自动跟进 _2/_3 分页。"""
+    """抓取整章：自动跟进 _2/_3 分页。漫画源返回 kind=comic 的图片列表。"""
+    if mkz.is_mkz(url):
+        return mkz.chapter(url)
     if qm.is_qm(url):
         return qm.chapter(url)
     if shuqi.is_sq(url):

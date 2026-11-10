@@ -1,5 +1,5 @@
 """
-本地书籍：TXT / EPUB 导入、解析与读取。
+本地书籍：TXT / EPUB / 漫画包（CBZ、ZIP、图片版 EPUB）导入、解析与读取。
 
 只用标准库，不联网。书籍 id 用 `loc:` 前缀，章节地址形如 `loc:<hash>/<序号>`，
 和八个网络书源共用同一套 /api/book、/api/chapter 接口，前端不需要单独分支。
@@ -7,6 +7,9 @@
 落盘结构：
     data/local/<hash>.json          # 书名 / 作者 / 简介 / 章节目录
     data/local/<hash>/000123.json   # 单章正文（按章存，读一章不用加载整本）
+    data/local/<hash>/img/000001.jpg  # 漫画页图片（导入时解压，按顺序编号）
+
+漫画书的 meta 带 kind="comic"，章节 JSON 里没有 paras，只有 pages（图片文件名列表）。
 """
 import html
 import json
@@ -28,6 +31,12 @@ LOCAL_DIR = os.path.join(DATA, "local")
 MAX_BYTES = 40 * 1024 * 1024
 
 SRC_NAME = "本地导入"
+
+# 漫画包可能比纯文本大得多（一话十几张图），单独放宽上限
+MAX_COMIC_BYTES = 220 * 1024 * 1024
+IMG_EXT = (".jpg", ".png", ".webp", ".gif", ".bmp", ".avif")
+_IMG_MIME = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp",
+             ".gif": "image/gif", ".bmp": "image/bmp", ".avif": "image/avif"}
 
 # 「第一章 xxx」/「楔子」这类独立成行的标题。行内出现的「第 x 章」不作数：
 # 先抓行首的「第X章」，再用 _looks_title 判断后面跟的是标题还是正文句子。
@@ -260,6 +269,188 @@ def parse_txt(raw, fallback_title=""):
     return title, author, "", split_txt(text)
 
 
+# ---------------------------------------------------------------- 漫画包
+
+def _natural(name):
+    """1.jpg / 2.jpg / 10.jpg 要按数字排，不能按字符串（否则 10 排在 2 前面）。"""
+    return [int(t) if t.isdigit() else t.lower()
+            for t in re.split(r"(\d+)", str(name or ""))]
+
+
+def _img_ext(name):
+    ext = posixpath.splitext(str(name or ""))[1].lower()
+    if ext in (".jpeg", ".jpe"):
+        return ".jpg"
+    return ext if ext in IMG_EXT else ""
+
+
+def _sniff_ext(blob, name=""):
+    """优先看文件头：压缩包里的扩展名经常是错的（.jpg 其实是 png）。"""
+    if blob[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if blob[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if blob[:4] == b"RIFF" and blob[8:12] == b"WEBP":
+        return ".webp"
+    if blob[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+    if blob[:2] == b"BM":
+        return ".bmp"
+    return _img_ext(name)
+
+
+def _comic_entries(names):
+    out = []
+    for n in names:
+        if n.endswith("/") or "__MACOSX" in n:
+            continue
+        base = posixpath.basename(n)
+        if not base or base.startswith("."):
+            continue
+        if _img_ext(base):
+            out.append(n)
+    return out
+
+
+def _group_by_dir(names, fallback):
+    """一个目录一话；只有一层图片就整包一话（常见于单话 CBZ）。"""
+    by_dir = {}
+    for n in names:
+        by_dir.setdefault(posixpath.dirname(n), []).append(n)
+    if len(by_dir) >= 2:
+        groups = []
+        for d in sorted(by_dir, key=_natural):
+            label = posixpath.basename(d) or ("第%d话" % (len(groups) + 1))
+            groups.append((label, sorted(by_dir[d], key=_natural)))
+        return groups
+    return [(fallback, sorted(names, key=_natural))]
+
+
+def parse_zip_comic(raw, fallback):
+    """CBZ / ZIP → [(话名, [(原文件名, 图片字节)])]。"""
+    import io
+
+    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+        names = _comic_entries(zf.namelist())
+        if not names:
+            raise ValueError("压缩包里没有图片（支持 jpg / png / webp / gif）")
+        groups = []
+        for label, items in _group_by_dir(names, fallback):
+            pages = [(posixpath.basename(n), zf.read(n)) for n in items]
+            pages = [(nm, b) for nm, b in pages if b]
+            if pages:
+                groups.append((label, pages))
+    return groups
+
+
+def parse_epub_comic(raw, fallback):
+    """图片版 EPUB：按 spine 顺序取每页的 <img>，一个 xhtml 当一个话。"""
+    import io
+
+    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+        names = set(zf.namelist())
+        opf_path = ""
+        try:
+            cont = zf.read("META-INF/container.xml").decode("utf-8", "ignore")
+            m = re.search(r'full-path="([^"]+)"', cont)
+            if m:
+                opf_path = m.group(1)
+        except KeyError:
+            pass
+        if not opf_path:
+            cand = [n for n in names if n.lower().endswith(".opf")]
+            opf_path = cand[0] if cand else ""
+        if not opf_path or opf_path not in names:
+            raise ValueError("这个 EPUB 缺少 OPF 目录文件，无法解析")
+
+        base = posixpath.dirname(opf_path)
+        opf = zf.read(opf_path).decode("utf-8", "ignore")
+        items = {}
+        for tag in re.findall(r"(?is)<item\b[^>]*>", opf):
+            mid = re.search(r'\bid="([^"]+)"', tag)
+            href = re.search(r'\bhref="([^"]+)"', tag)
+            if mid and href:
+                items[mid.group(1)] = html.unescape(href.group(1))
+        spine = re.findall(r'(?is)<itemref\b[^>]*\bidref="([^"]+)"', opf)
+        hrefs = [items[i] for i in spine if i in items] or list(items.values())
+
+        groups = []
+        for href in hrefs:
+            path = posixpath.normpath(posixpath.join(base, href.split("#")[0])) \
+                if base else posixpath.normpath(href.split("#")[0])
+            if path not in names:
+                continue
+            page = zf.read(path).decode("utf-8", "ignore")
+            pages = []
+            for src in re.findall(r'(?is)<img[^>]+src="([^"]+)"', page):
+                p = posixpath.normpath(posixpath.join(
+                    posixpath.dirname(path), html.unescape(src).split("#")[0]))
+                if p in names:
+                    pages.append((posixpath.basename(p), zf.read(p)))
+            if pages:
+                groups.append((_epub_title(page, "第%d话" % (len(groups) + 1)), pages))
+    return groups
+
+
+def _import_comic(name, raw, fallback):
+    """把漫画包解压成「每话一个 JSON + 一堆编号图片」。"""
+    lower = name.lower()
+    if lower.endswith((".cbz", ".zip")) or not lower.endswith(".epub"):
+        groups = parse_zip_comic(raw, fallback)
+    else:
+        groups = parse_epub_comic(raw, fallback)
+    if not groups:
+        raise ValueError("这本漫画没有解析出任何可看的页")
+
+    h = _hash(raw, fallback)
+    bid = PREFIX + h
+    img_dir = os.path.join(_chap_dir(h), "img")
+    os.makedirs(img_dir, exist_ok=True)
+
+    catalog, seq = [], 0
+    for label, pages in groups:
+        keep = []
+        for src_name, blob in pages:
+            ext = _sniff_ext(blob, src_name)
+            if not ext or not blob:
+                continue
+            seq += 1
+            fn = "%06d%s" % (seq, ext)
+            with open(os.path.join(img_dir, fn), "wb") as f:
+                f.write(blob)
+            keep.append(fn)
+        if not keep:
+            continue
+        idx = len(catalog)
+        url = "%s%s/%d" % (PREFIX, h, idx)
+        with open(os.path.join(_chap_dir(h), "%06d.json" % idx), "w", encoding="utf-8") as f:
+            json.dump({"title": label, "kind": "comic", "pages": keep, "url": url},
+                      f, ensure_ascii=False)
+        catalog.append({"t": label, "u": url, "i": idx})
+
+    if not catalog:
+        raise ValueError("这本漫画没有可显示的图片")
+
+    meta = {
+        "id": bid,
+        "title": fallback,
+        "author": "佚名",
+        "intro": "本地导入的漫画，无需联网，打开即可阅读。",
+        "source": SRC_NAME,
+        "category": "本地漫画",
+        "status": "%d 话" % len(catalog),
+        "cover": "/api/local/page?id=%s&ch=0&i=0" % bid,
+        "created": time.time(),
+        "count": len(catalog),
+        "kind": "comic",
+        "unit": "话",
+        "chapters": [{"t": c["t"], "u": c["u"]} for c in catalog],
+    }
+    with open(_meta_path(h), "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False)
+    return meta
+
+
 # ------------------------------------------------------------------ 导入 / 读取
 
 def _clean_intro(intro):
@@ -272,16 +463,27 @@ def import_bytes(name, raw):
     name = str(name or "未命名.txt")
     if not raw:
         raise ValueError("文件是空的")
-    if len(raw) > MAX_BYTES:
-        raise ValueError("文件超过 40MB，请先拆分再导入")
-
     lower = name.lower()
-    fallback = re.sub(r"\.(txt|epub|text)$", "", name, flags=re.I).strip() or "未命名"
+    fallback = re.sub(r"\.(txt|epub|cbz|zip|text)$", "", name, flags=re.I).strip() or "未命名"
+
+    # 漫画包动辄一百多兆，纯文本 40MB 已经是天量，两个上限分开
+    is_comic_pack = lower.endswith((".cbz", ".zip"))
+    limit = MAX_COMIC_BYTES if is_comic_pack or lower.endswith(".epub") else MAX_BYTES
+    if len(raw) > limit:
+        raise ValueError("文件超过 %dMB，请先拆分再导入" % (limit // (1024 * 1024)))
+
+    if is_comic_pack:
+        if raw[:2] != b"PK":
+            raise ValueError("这不是有效的 CBZ / ZIP 文件")
+        return _import_comic(name, raw, fallback)
 
     if lower.endswith(".epub") or raw[:2] == b"PK":
         if raw[:2] != b"PK":
             raise ValueError("这不是有效的 EPUB 文件")
         title, author, intro, chapters = parse_epub(raw, fallback)
+        if not chapters:
+            # 文字层是空的：多半是图片版漫画 EPUB，按漫画再解一次
+            return _import_comic(name, raw, fallback)
     else:
         title, author, intro, chapters = parse_txt(raw, fallback)
 
@@ -349,7 +551,40 @@ def chapter(url):
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     data["bookId"] = PREFIX + h
+    if data.get("kind") == "comic":
+        # 页面地址统一成接口形式，前端不关心图片是本地解压的还是线上拉的
+        data["pages"] = ["/api/local/page?id=%s%s&ch=%d&i=%d"
+                         % (PREFIX, h, int(idx), i)
+                         for i in range(len(data.get("pages") or []))]
     return data
+
+
+def page(bid, ch, i):
+    """读一页本地漫画图，返回 (bytes, content-type)。"""
+    h = _hash_of(bid)
+    if not h:
+        raise ValueError("不是本地书籍")
+    try:
+        ch, i = int(ch), int(i)
+    except (TypeError, ValueError):
+        raise ValueError("页参数不合法") from None
+    path = os.path.join(_chap_dir(h), "%06d.json" % ch)
+    if not os.path.isfile(path):
+        raise ValueError("没有这一话")
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    pages = data.get("pages") or []
+    if not (0 <= i < len(pages)):
+        raise ValueError("没有这一页")
+    fn = str(pages[i])
+    if "/" in fn or "\\" in fn or ".." in fn:
+        raise ValueError("页地址不合法")
+    p = os.path.join(_chap_dir(h), "img", fn)
+    if not os.path.isfile(p):
+        raise ValueError("这一页的图片不见了")
+    ext = posixpath.splitext(fn)[1].lower()
+    with open(p, "rb") as f:
+        return f.read(), _IMG_MIME.get(ext, "image/jpeg")
 
 
 def list_books():

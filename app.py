@@ -37,7 +37,7 @@ if sys.platform in ("ios", "android") or os.environ.get("SUDUGU_EMBEDDED"):
     _ca = os.path.join(ROOT, "cacert.pem")
     if os.path.exists(_ca):
         os.environ.setdefault("SSL_CERT_FILE", _ca)
-from reader import ali, bc, blxs, core, dq, qbxs, qm, shuqi, net, localbook  # noqa: E402
+from reader import ali, bc, blxs, core, dq, mkz, qbxs, qm, shuqi, net, localbook  # noqa: E402
 
 # 统一网络层：证书链兼容、gzip 解压、默认超时、可读错误（对全部书源生效）
 net.install()
@@ -174,7 +174,11 @@ def api_book(bid, refresh=False):
 
 def chapter_key(url, with_bid=False):
     """章节缓存 key。离线判断和预取都复用它，避免两套算法对不上。"""
-    if qm.is_qm(url):
+    if mkz.is_mkz(url):
+        parts = [p for p in str(url).replace(mkz.SCHEME, "").replace(mkz.PREFIX, "").split("/") if p]
+        bid = mkz.PREFIX + (parts[0] if parts else "")
+        cid = parts[1] if len(parts) > 1 else ""
+    elif qm.is_qm(url):
         parts = [p for p in url.replace(qm.SCHEME, "").split("/") if p]
         bid = qm.PREFIX + (parts[0] if parts else "")
         cid = parts[1] if len(parts) > 1 else ""
@@ -218,6 +222,9 @@ def chapter_cached(url):
 def api_chapter(url):
     if localbook.is_local(url):
         return localbook.chapter(url)
+    if mkz.is_mkz(url):
+        # 漫画每话是一组带签名的图片地址，签名会过期，缓存正文等于缓存一堆死链
+        return mkz.chapter(url)
     key, bid = chapter_key(url, True)
     data = cache_get(key)
     if data:
@@ -523,6 +530,9 @@ def start_prefetch(bid, start=0, count=8):
     """后台预取后续章节，只补没缓存的；已缓存 / 正在抓取的都会跳过。"""
     if localbook.is_local(bid):
         return {"ok": True, "queued": 0}   # 本地书不用预取
+    if str(bid).startswith(mkz.PREFIX):
+        # 漫画每话是带签名的图片地址列表，不落缓存；预取只会反复拉 JSON，白费流量
+        return {"ok": True, "queued": 0}
     book = cache_get("book_%s" % bid)
     if not book:
         return {"ok": False, "queued": 0}
@@ -1214,6 +1224,50 @@ def api_img(url):
             _IMG_BUSY.discard(name)
 
 
+_COMIC_EXT = (".webp", ".jpg", ".png", ".gif")
+
+
+def api_comic_page(url):
+    """漫画单页图片：CDN 直连 + 磁盘缓存。
+
+    地址里的 auth_key 每次都变，所以缓存键只取路径 —— 同一张图换了签名照样命中，
+    不会因为签名轮换把缓存全废掉。返回 (bytes, content-type)。
+    """
+    parts = urllib.parse.urlsplit(str(url or ""))
+    if not parts.netloc or "/comic" not in parts.path:
+        raise RuntimeError("图片地址不合法")
+    h = hashlib.md5(parts.path.encode("utf-8")).hexdigest()[:20]
+    for ext in _COMIC_EXT:
+        p = os.path.join(IMG, "comic_%s%s" % (h, ext))
+        if os.path.isfile(p) and os.path.getsize(p) > 0:
+            with open(p, "rb") as f:
+                return f.read(), MIME.get(ext, "image/jpeg")
+
+    blob, ctype = mkz.page_bytes(str(url))
+    if not blob:
+        raise RuntimeError("图片没有下载下来")
+    ctype = (ctype or "").split(";")[0].strip().lower()
+    ext = {".webp": ".webp", ".png": ".png", ".gif": ".gif"}.get(
+        "." + ctype.rsplit("/", 1)[-1], ".jpg")
+    if blob[:4] == b"\x89PNG":
+        ext = ".png"
+    elif blob[:4] == b"RIFF" and blob[8:12] == b"WEBP":
+        ext = ".webp"
+    try:
+        with open(os.path.join(IMG, "comic_%s%s" % (h, ext)), "wb") as f:
+            f.write(blob)
+    except OSError:
+        pass
+    return blob, ctype or "image/jpeg"
+
+
+def api_comic_open(text):
+    """按链接/ID 认出一本在线漫画，顺手返回目录，前端拿到就能直接入架。"""
+    data = mkz.probe(text)
+    cache_set("book_%s" % data["id"], data)
+    return data
+
+
 # ------------------------------------------------------------------ 本地书 / 书签 / 备份 / 统计
 
 def _today(offset=0):
@@ -1419,13 +1473,13 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     # ---------- 工具
-    def _send(self, body, ctype="application/json; charset=utf-8", code=200):
+    def _send(self, body, ctype="application/json; charset=utf-8", code=200, cache="no-store"):
         if isinstance(body, str):
             body = body.encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         self.end_headers()
         try:
             self.wfile.write(body)
@@ -1524,6 +1578,19 @@ class Handler(BaseHTTPRequestHandler):
             ctype = "image/png" if blob[:4] == b"\x89PNG" else (
                 "image/webp" if blob[:4] == b"RIFF" and blob[8:12] == b"WEBP" else "image/jpeg")
             return self._send(blob, ctype)
+        if path == "/api/comic/page":
+            try:
+                blob, ctype = api_comic_page(self._arg("u"))
+            except Exception as e:  # noqa: BLE001
+                return self._json({"error": str(e)}, 502)
+            return self._send(blob, ctype, cache="public, max-age=604800")
+        if path == "/api/local/page":
+            try:
+                blob, ctype = localbook.page(
+                    self._arg("id"), self._arg("ch", "0"), self._arg("i", "0"))
+            except Exception as e:  # noqa: BLE001
+                return self._err(str(e))
+            return self._send(blob, ctype, cache="public, max-age=604800")
         if path == "/api/download":
             bid = self._arg("bookId")
             with _DL_LOCK:
@@ -1586,6 +1653,8 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:  # noqa: BLE001
             body = {}
         try:
+            if path == "/api/comic/open":
+                return self._json(api_comic_open(str(body.get("url") or "")))
             if path == "/api/local/delete":
                 bid = str(body.get("bookId") or "")
                 if not bid:
@@ -1698,6 +1767,14 @@ class Handler(BaseHTTPRequestHandler):
                 "ratio": body.get("ratio", 0),
                 "ts": time.time(),
             }
+            # 漫画多两个字段：读到第几页、这一话共几页。小说没有，别写空键
+            if body.get("kind") == "comic":
+                item["kind"] = "comic"
+                try:
+                    item["pg"] = max(0, int(body.get("pg") or 0))
+                    item["pages"] = max(0, int(body.get("pages") or 0))
+                except (TypeError, ValueError):
+                    item["pg"], item["pages"] = 0, 0
             st["progress"][bid] = item
             shelf = st["shelf"].get(bid)
             if shelf:
