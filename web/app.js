@@ -474,7 +474,10 @@
   const busy = (on) => {
     loadingCount += on ? 1 : -1;
     if (loadingCount < 0) loadingCount = 0;
-    $('#loading').hidden = loadingCount === 0;
+    const el = $('#loading');
+    el.hidden = loadingCount === 0;
+    // 阅读器里遮罩跟阅读器配色走：漫画/夜间阅读时纸色蒙层会变成灰蒙蒙
+    el.classList.toggle('on-reader', !reader.hidden);
   };
 
   let toastTimer;
@@ -2157,6 +2160,26 @@
     updatePos();
   }
 
+  // 桌面端：滚轮翻页（页漫）；放大后滚轮改为平移；条漫用原生滚动不受影响
+  let wheelAt = 0;
+  rEl.pages.addEventListener('wheel', (e) => {
+    if (!isComic() || rEl.pages.dataset.mode === 'scroll') return;
+    e.preventDefault();
+    if (z.s > 1) { // 放大状态下平移画面
+      z.x -= e.deltaX; z.y -= e.deltaY;
+      clampPan(); applyZoom();
+      return;
+    }
+    const d = Math.abs(e.deltaY) >= Math.abs(e.deltaX)
+      ? e.deltaY
+      : (comicRtl() ? -e.deltaX : e.deltaX); // 右起时横向滚轮也反向
+    if (Math.abs(d) < 8) return;
+    const now = Date.now();
+    if (now - wheelAt < 320) return; // 触控板惯性节流
+    wheelAt = now;
+    if (d > 0) comicNext(); else comicPrev();
+  }, { passive: false });
+
   // 条漫滚动时反推「现在是第几页」，用于页码与进度
   function comicPageFromScroll() {
     const imgs = rEl.pages.querySelectorAll('img[data-i]');
@@ -2215,7 +2238,8 @@
     R.cpage = 0;
     rEl.pages.hidden = false;
     rEl.pages.dataset.mode = 'page';
-    rEl.pages.innerHTML = '<div class="cp-tip">正在加载这一话…</div>';
+    rEl.pages.innerHTML = '<div class="cp-tip"><div class="cp-spin"></div>正在加载这一话…</div>';
+    rEl.page.textContent = '…'; // 加载中右下角别显示残留的 1 / 1
     resetZoom();
     let data;
     try {

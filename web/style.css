@@ -578,6 +578,9 @@ a { color: inherit; text-decoration: none; }
 @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
 .loading { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; background: rgba(244, 239, 230, .55); backdrop-filter: blur(1px); }
+/* 阅读器内：busy 遮罩隐形，加载反馈由 cp-spin / 「正在加载章节…」承担，避免双转圈叠一起 */
+.loading.on-reader { background: transparent; backdrop-filter: none; }
+.loading.on-reader .spinner { visibility: hidden; }
 .spinner {
   width: 26px; height: 26px; border-radius: 50%;
   border: 2.5px solid #d9cbb6; border-top-color: var(--accent);
@@ -1592,10 +1595,11 @@ html[data-theme="dark"] .mk-del:hover { background: rgba(226, 104, 92, .18); col
 /* 小说模式这个层是空的，但它铺满首屏、还是 z-index:1，会挡住选词和双击 */
 .reader:not([data-kind="comic"]) .r-pages { display: none; }
 
-/* 页漫：图片居中，黑边由背景吃掉 */
+/* 页漫：图片居中，黑边由背景吃掉（画布统一暗色，加载中也不露纸色底子） */
 .r-pages[data-mode="page"] {
   display: flex; align-items: center; justify-content: center;
   overflow: hidden; touch-action: none;
+  background: #0d0f13;
 }
 .r-pages[data-mode="page"] .cp-slide {
   position: absolute; inset: 0;
@@ -1624,6 +1628,10 @@ html[data-theme="dark"] .mk-del:hover { background: rgba(226, 104, 92, .18); col
   margin: 0 auto; background: #14171c;
   transition: none;
 }
+/* 桌面宽窗口：条漫限宽居中，避免整话图被拉到全屏宽 */
+@media (min-width: 760px) {
+  .r-pages[data-mode="scroll"] .cp-img { max-width: min(720px, 100%); }
+}
 
 /* 换页时的一点位移感：按翻页方向滑入 */
 @keyframes cpInL { from { opacity: .3; transform: translateX(28px); } to { opacity: 1; transform: none; } }
@@ -1631,13 +1639,19 @@ html[data-theme="dark"] .mk-del:hover { background: rgba(226, 104, 92, .18); col
 .r-pages[data-mode="page"] .cp-slide.in-l { animation: cpInL .2s ease; }
 .r-pages[data-mode="page"] .cp-slide.in-r { animation: cpInR .2s ease; }
 
-/* 页角页码 / 加载失败提示 */
+/* 页角页码 / 加载失败提示（漫画层是暗底，文字用亮灰） */
 .cp-tip {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-  font-size: 13px; color: var(--r-sub); text-align: center;
+  font-size: 13px; color: #97a0af; text-align: center;
   line-height: 1.9; pointer-events: none;
 }
 .cp-tip .btn { pointer-events: auto; margin-top: 10px; }
+/* 漫画加载中的转圈（在暗色画布上） */
+.cp-spin {
+  width: 22px; height: 22px; margin: 0 auto 12px; border-radius: 50%;
+  border: 2.5px solid rgba(255, 255, 255, .16); border-top-color: #e8b27d;
+  animation: spin .7s linear infinite;
+}
 .cp-badge {
   position: absolute; right: 12px; bottom: 12px; z-index: 3;
   padding: 2px 9px; border-radius: 999px;
