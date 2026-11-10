@@ -951,6 +951,7 @@
         } },
         { sep: true },
         { label: '添加在线漫画', run: addOnlineComic },
+        { label: '导入本地书', run: importLocalBook },
         { label: shelfManage ? '退出管理' : '管理书架', run: () => {
           if (shelfManage) exitShelfManage();
           else { shelfManage = true; shelfPicked.clear(); }
@@ -1262,9 +1263,12 @@
     });
     $('#disc-src').addEventListener('click', (e) => {
       e.stopPropagation();
-      togglePop(e.currentTarget, 'disc-src', DISC_SRC.map(([k, n]) => ({
-        label: n, on: k === src, run: () => go(`#/discover?src=${k}`),
-      })), '选择书源');
+      togglePop(e.currentTarget, 'disc-src', [
+        { sep: true, label: '小说' },
+        ...DISC_SRC_NOVEL.map(([k, n]) => ({ label: n, on: k === src, run: () => go(`#/discover?src=${k}`) })),
+        { sep: true, label: '漫画' },
+        ...DISC_SRC_COMIC.map(([k, n]) => ({ label: n, on: k === src, run: () => go(`#/discover?src=${k}`) })),
+      ], '选择书源');
     });
     $('#disc-refresh').addEventListener('click', () => {
       toast('正在刷新…');
