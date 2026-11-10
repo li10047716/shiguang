@@ -2819,6 +2819,7 @@
   function toggleToc(force) {
     const show = force != null ? force : rEl.drawer.hidden;
     rEl.drawer.hidden = !show;
+    $('#r-mask').hidden = !show;
     // 目录打开时收起返回按钮与左下角百分比，避免被抽屉盖住
     reader.classList.toggle('toc-open', show);
     if (show) {
@@ -2867,8 +2868,111 @@
     go(R.backHash || '#/shelf');
   });
   $('#r-toc-btn').addEventListener('click', () => toggleToc());
-  $('#toc-close').addEventListener('click', () => toggleToc(false));
+  $('#r-mask').addEventListener('click', () => toggleToc(false));
   $('#toc-filter').addEventListener('input', (e) => renderToc(e.target.value));
+
+  // 目录抽屉右下角：定位回当前章节（列表滚走了以后一键回来）
+  $('#toc-locate').addEventListener('click', () => {
+    const on = rEl.toc.querySelector('a.on');
+    if (!on) { toast('当前章节不在列表里，清空搜索框再试'); return; }
+    rEl.toc.scrollTo({
+      top: Math.max(0, on.offsetTop - rEl.toc.clientHeight / 2 + on.offsetHeight / 2),
+      behavior: 'smooth',
+    });
+  });
+
+  // 目录抽屉向下拖动消失：头部（搜索行）可直接抓握，列表滚到顶继续下拉也跟着走；
+  // 松手超过 110px 就关，否则弹回。触摸 + 鼠标都支持。
+  (() => {
+    const drawer = rEl.drawer, body = rEl.toc, head = drawer.querySelector('.drawer-head');
+    let drag = null, suppressClick = false;
+    const begin = (y, fromBody) => {
+      drag = { y0: y, dy: 0, fromBody };
+      drawer.classList.add('dragging');
+    };
+    const apply = (y) => {
+      if (!drag) return;
+      drag.dy = Math.max(0, y - drag.y0);
+      if (drag.dy > 6) suppressClick = true;
+      if (drag.dy > 0) drawer.style.transform = 'translateY(' + drag.dy + 'px)';
+    };
+    const finish = (dy) => {
+      drag = null;
+      drawer.classList.remove('dragging');
+      if (dy > 110) {
+        drawer.style.transition = 'transform .18s ease, opacity .18s ease';
+        drawer.style.transform = 'translateY(72%)';
+        drawer.style.opacity = '0';
+        setTimeout(() => {
+          toggleToc(false);
+          drawer.style.transition = '';
+          drawer.style.transform = '';
+          drawer.style.opacity = '';
+        }, 190);
+      } else {
+        drawer.classList.add('spring');
+        drawer.style.transform = '';
+        setTimeout(() => drawer.classList.remove('spring'), 230);
+      }
+      setTimeout(() => { suppressClick = false; }, 60);
+    };
+    const end = () => { if (drag) finish(drag.dy); };
+    head.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) begin(e.touches[0].clientY, false);
+    }, { passive: true });
+    head.addEventListener('touchmove', (e) => {
+      if (drag && !drag.fromBody) apply(e.touches[0].clientY);
+    }, { passive: true });
+    head.addEventListener('touchend', end);
+    head.addEventListener('touchcancel', end);
+    // 鼠标：在头部按下后，检测到明确的纵向拖动意图（>25px 且纵向为主）才接管，
+    // 避免干扰搜索框的正常点击聚焦
+    head.addEventListener('mousedown', (e) => {
+      const sx = e.clientX, sy = e.clientY, inp = head.querySelector('input');
+      let taken = false, dy = 0;
+      const mv = (ev) => {
+        const dx = ev.clientX - sx, dyy = ev.clientY - sy;
+        if (!taken) {
+          if (Math.abs(dyy) > 25 && Math.abs(dyy) > Math.abs(dx)) {
+            taken = true;
+            begin(sy, false);
+            if (inp) inp.blur();
+          } else return;
+        }
+        apply(ev.clientY);
+        dy = drag ? drag.dy : 0;
+      };
+      const up = () => {
+        window.removeEventListener('mousemove', mv);
+        window.removeEventListener('mouseup', up);
+        if (taken) finish(dy);
+      };
+      window.addEventListener('mousemove', mv);
+      window.addEventListener('mouseup', up);
+    });
+    // 列表滚到顶继续下拉 → 抽屉跟手；一旦列表滚动了就交还给原生滚动。
+    // 在顶部时只要往下动就立刻 preventDefault，防止浏览器先把手势判给滚动后发 touchcancel
+    body.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1 && body.scrollTop <= 0) begin(e.touches[0].clientY, true);
+    }, { passive: true });
+    body.addEventListener('touchmove', (e) => {
+      if (!drag || !drag.fromBody) return;
+      if (body.scrollTop > 0) {
+        drag = null;
+        drawer.classList.remove('dragging');
+        drawer.style.transform = '';
+        return;
+      }
+      const dy = e.touches[0].clientY - drag.y0;
+      if (dy > 0) { e.preventDefault(); apply(e.touches[0].clientY); }
+    }, { passive: false });
+    body.addEventListener('touchend', end);
+    body.addEventListener('touchcancel', end);
+    // 拖动松手后抑制误点章节链接
+    drawer.addEventListener('click', (e) => {
+      if (suppressClick) { e.preventDefault(); e.stopPropagation(); }
+    }, true);
+  })();
   $('#r-set-btn').addEventListener('click', (e) => {
     e.stopPropagation();
     rEl.set.hidden = !rEl.set.hidden;

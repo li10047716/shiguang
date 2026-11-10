@@ -98,12 +98,13 @@
   <div class="r-corner right" id="r-page">1 / 1</div>
 
 
+  <div class="r-mask" id="r-mask" hidden></div>
   <div class="r-drawer" id="r-drawer" hidden>
     <div class="drawer-head">
       <input id="toc-filter" placeholder="跳转到章节…" autocomplete="off">
-      <button class="icon-btn" id="toc-close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <div class="drawer-body" id="toc-list"></div>
+    <button class="toc-locate" id="toc-locate" title="定位到当前章节"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="2.6" fill="currentColor"/><path d="M12 1.5v3.2M12 19.3v3.2M1.5 12h3.2M19.3 12h3.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
   </div>
 
   <div class="r-set" id="r-set" hidden>

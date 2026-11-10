@@ -510,6 +510,12 @@ a { color: inherit; text-decoration: none; }
 /* 沉浸模式下轻点正文的提示光标 */
 .reader.ui-hidden .r-scroll { cursor: default; }
 
+.r-mask {
+  position: absolute; inset: 0; z-index: 9;
+  background: rgba(28, 18, 6, .34);
+  animation: rMaskIn .2s ease;
+}
+@keyframes rMaskIn { from { opacity: 0; } to { opacity: 1; } }
 .r-drawer {
   position: absolute; top: 0; bottom: 0; left: 0; width: 400px; max-width: 84vw;
   /* 漫画的全屏图片层是 z-index:1，抽屉要压在它上面才看得见 */
@@ -518,8 +524,19 @@ a { color: inherit; text-decoration: none; }
   display: flex; flex-direction: column; box-shadow: 16px 0 40px rgba(40, 25, 10, .12);
   animation: slideIn .22s ease;
 }
+.r-drawer.dragging { transition: none !important; animation: none; }
+.r-drawer.spring { transition: transform .22s ease; }
+/* 目录右下角：定位当前章节 */
+.toc-locate {
+  position: absolute; right: 14px; bottom: 16px; width: 40px; height: 40px;
+  border-radius: 50%; border: 0; cursor: pointer;
+  background: var(--accent); color: #fff; display: grid; place-items: center;
+  box-shadow: 0 4px 14px rgba(40, 25, 10, .28); opacity: .88;
+}
+.toc-locate svg { width: 20px; height: 20px; }
+.toc-locate:active { transform: scale(.94); }
 @keyframes slideIn { from { transform: translateX(-24px); opacity: .4; } to { transform: none; opacity: 1; } }
-.drawer-head { display: flex; gap: 8px; padding: 12px; border-bottom: 1px solid var(--r-line); }
+.drawer-head { display: flex; gap: 8px; padding: 12px; border-bottom: 1px solid var(--r-line); touch-action: none; }
 .drawer-head input {
   flex: 1; border: 1px solid var(--r-line); background: var(--r-bg); color: var(--r-ink);
   border-radius: 9px; padding: 9px 12px; font-size: 13px; outline: none; font-family: inherit;
