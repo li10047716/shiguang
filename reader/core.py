@@ -336,7 +336,7 @@ def search(keyword, src="all", page=1):
         try:
             for name, limit, fut in futs:
                 try:
-                    r = fut.result(timeout=25)
+                    r = fut.result(timeout=35)
                     out = r.get("books", [])
                     books.extend(out[:limit] if limit else out)
                     if r.get("msg"):

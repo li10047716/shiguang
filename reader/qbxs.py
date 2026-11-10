@@ -18,6 +18,8 @@ import urllib.parse
 import urllib.request
 
 BASE = "https://www.qbxs.net"
+# 移动网络下 www 入口偶发连不上 / 证书链异常，无 www 的官方域名是同一套站点
+ALT_BASE = "https://qbxs.net"
 PREFIX = "qb:"
 SCHEME = "qb://"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -28,6 +30,8 @@ _HDR = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,"
               "image/webp,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9",
+    # 明确不接收压缩，移动网关偶发返回 gzip 会让正文变成乱码
+    "Accept-Encoding": "identity",
     "Referer": BASE + "/",
 }
 
@@ -61,31 +65,50 @@ def native_id(value):
     return v.split("/")[0]
 
 
-def _get(url, timeout=25, retries=2):
-    """取页面。站点偶发 SSL 断连，重试两次基本都能过。"""
+def _get(url, timeout=12, retries=2):
+    """取页面。
+
+    手机弱网下单次超时不能太长：原来 25s×3 最长 75 秒，必然被前端掐断。
+    现在主入口试几次（短超时），全失败再换无 www 的官方域名兜底一次，
+    整条链路控制在 ~35 秒内；证书校验失败由 reader.net 自动降级重试。
+    """
+    from . import net
+
+    def once(u, t):
+        req = urllib.request.Request(u, headers=_HDR)
+        with urllib.request.urlopen(req, timeout=t) as r:
+            raw = r.read()
+            ctype = r.headers.get("Content-Type", "") or ""
+            enc = "utf-8"
+            m = re.search(r"charset=([\w-]+)", ctype, re.I)
+            if m:
+                enc = m.group(1).lower()
+            if enc in ("gbk", "gb2312", "gb18030"):
+                enc = "gb18030"
+            return raw.decode(enc, "ignore")
+
     err = None
     for i in range(retries + 1):
         try:
-            req = urllib.request.Request(url, headers=_HDR)
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                raw = r.read()
-                ctype = r.headers.get("Content-Type", "") or ""
-                enc = "utf-8"
-                m = re.search(r"charset=([\w-]+)", ctype, re.I)
-                if m:
-                    enc = m.group(1).lower()
-                if enc in ("gbk", "gb2312", "gb18030"):
-                    enc = "gb18030"
-                return raw.decode(enc, "ignore")
+            return once(url, timeout)
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 raise RuntimeError("页面不存在：%s" % url)
             err = e
+            break  # 403 之类的状态码换域名也一样，别浪费时间
         except Exception as e:  # noqa: BLE001
             err = e
         if i < retries:
-            time.sleep(0.8 * (i + 1))
-    raise RuntimeError("全本小说网请求失败：%s（%s）" % (url, err))
+            time.sleep(0.5 * (i + 1))
+
+    # 兜底入口：仅当主域名整体不可达时尝试
+    if url.startswith(BASE):
+        alt = ALT_BASE + url[len(BASE):]
+        try:
+            return once(alt, timeout)
+        except Exception as e2:  # noqa: BLE001
+            err = e2
+    raise RuntimeError("全本小说网请求失败：%s" % net.friendly(err))
 
 
 def _text(frag):
@@ -282,7 +305,7 @@ def book(book_id):
     if not bid:
         raise RuntimeError("缺少全本小说网书籍 id")
     url = "%s/book/%s/" % (BASE, bid)
-    html = _get(url, timeout=40)
+    html = _get(url, timeout=18)
 
     tm = re.search(r'<div class="introduce">\s*<h1>([\s\S]*?)</h1>', html)
     title = _text(tm.group(1)) if tm else ""
@@ -412,7 +435,7 @@ def chapter(url):
     prev_url = ""
     next_url = ""
     for _ in range(8):  # 单章最多 8 页，足够
-        html = _get(curr, timeout=30)
+        html = _get(curr, timeout=15)
         t, ps, pu, pt, nu, nt = _chapter_parts(html)
         if not title:
             title = t

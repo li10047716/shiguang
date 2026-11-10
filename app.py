@@ -36,7 +36,10 @@ if sys.platform in ("ios", "android") or os.environ.get("SUDUGU_EMBEDDED"):
     _ca = os.path.join(ROOT, "cacert.pem")
     if os.path.exists(_ca):
         os.environ.setdefault("SSL_CERT_FILE", _ca)
-from reader import ali, bc, blxs, core, dq, qbxs, qm, shuqi  # noqa: E402
+from reader import ali, bc, blxs, core, dq, qbxs, qm, shuqi, net  # noqa: E402
+
+# 统一网络层：证书链兼容、gzip 解压、默认超时、可读错误（对全部书源生效）
+net.install()
 
 _LOCK = threading.Lock()
 LAST_PING = [0.0]
@@ -694,7 +697,17 @@ def api_ali_ranking(kind, page):
     return data
 
 
+_IMG_LOCK = threading.Lock()
+_IMG_BUSY = set()
+
+
 def api_img(url):
+    """封面代理。
+
+    图片请求会和搜索/详情抢 WKWebView 的同一 host 连接数，慢图床一旦挂住
+    就会拖垮所有 API（表现就是 Load failed）。所以这里：短超时、失败缓存、
+    同一张图的并发请求去重，失败立刻回占位图，绝不长时间占用连接。
+    """
     parts = urllib.parse.urlsplit(url)
     if "sudugu.cc" in parts.netloc:
         name = "%s_%s" % (core.book_id(url),
@@ -708,17 +721,40 @@ def api_img(url):
     if os.path.exists(path):
         with open(path, "rb") as f:
             return f.read()
+    fail = path + ".fail"
+    if os.path.exists(fail):
+        if time.time() - os.path.getmtime(fail) < 600:
+            return None
+        try:
+            os.remove(fail)
+        except OSError:
+            pass
+    with _IMG_LOCK:
+        if name in _IMG_BUSY:
+            return None
+        _IMG_BUSY.add(name)
     try:
-        if "alicesw" in parts.netloc or "321cdn" in parts.netloc:
-            # 这站和它的图床都只对代理可达
-            blob, _ = ali.fetch_bytes(url)
-        else:
-            blob, _ = core.http_get_bytes(url)
-        with open(path, "wb") as f:
-            f.write(blob)
-        return blob
-    except Exception:  # noqa: BLE001
+        try:
+            if "alicesw" in parts.netloc or "321cdn" in parts.netloc:
+                # 这站和它的图床都只对代理可达
+                blob, _ = ali.fetch_bytes(url, timeout=8)
+            else:
+                blob, _ = core.http_get_bytes(url, timeout=6)
+            if blob:
+                with open(path, "wb") as f:
+                    f.write(blob)
+                return blob
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            with open(fail, "w") as f:
+                f.write("failed")
+        except OSError:
+            pass
         return None
+    finally:
+        with _IMG_LOCK:
+            _IMG_BUSY.discard(name)
 
 
 # ------------------------------------------------------------------ HTTP
@@ -734,6 +770,18 @@ MIME = {
     ".ico": "image/x-icon",
     ".woff2": "font/woff2",
 }
+
+
+class _Server(ThreadingHTTPServer):
+    """iOS WKWebView 会一次性发来搜索 + 几十张封面请求。
+
+    默认 backlog 只有 5，弱网下封面代理稍慢就会把连接队列挤满，
+    后续 API 直接被拒 → 前端报 "Load failed"。这里把队列放宽。
+    """
+    request_queue_size = 128
+    daemon_threads = True
+    block_on_close = False
+    allow_reuse_address = True
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1036,7 +1084,7 @@ def start_server(host="127.0.0.1", port=None):
     port = pick_port() if port is None else port
     if port == 0:
         return None, PORT
-    srv = ThreadingHTTPServer((host, port), Handler)
+    srv = _Server((host, port), Handler)
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     LAST_PING[0] = time.time()

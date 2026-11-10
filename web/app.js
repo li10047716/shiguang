@@ -45,7 +45,7 @@
   const coverBox = (b, extra = '') => {
     const ch = esc(((b.title || '书').trim().charAt(0)) || '书');
     const inner = b.cover
-      ? `<img src="${img(b.cover)}" alt="${esc(b.title)}" onerror="coverFail(this)">`
+      ? `<img src="${img(b.cover)}" alt="${esc(b.title)}" loading="lazy" decoding="async" onerror="coverFail(this)">`
       : typoHTML(b.title);
     return `<div class="cover" data-ch="${ch}">${inner}${extra}</div>`;
   };
@@ -69,25 +69,56 @@
   };
 
   // ---------------------------------------------------------------- 网络
+  // WKWebView(iOS) 的 fetch 连接被拒 / 复用了后台挂起前的失效连接时，
+  // 抛的是 TypeError: Load failed（不是 DOMException AbortError），必须单独识别并重试。
+  const NET_ERR = /load failed|failed to fetch|network ?error|network request failed|connection was lost|could not connect|请求失败/i;
+
+  function friendlyNet(e) {
+    const m = String((e && (e.message || e)) || '');
+    if (NET_ERR.test(m)) return '本地服务连接中断，已重试；若仍失败请重启应用';
+    return m || '网络错误';
+  }
+
   async function api(path, opt) {
     const init = Object.assign({}, opt);
-    const ac = new AbortController();
-    // 搜索要并发抓 8 个书源，手机网络下给足时间；其它接口维持 25 秒
-    const timeout = path.indexOf('/api/search') === 0 ? 60000 : 25000;
-    const timer = setTimeout(() => ac.abort(), timeout);
-    if (!init.signal) init.signal = ac.signal;
-    try {
-      const r = await fetch(path, init);
-      const j = await r.json();
-      if (j && j.error) throw new Error(j.error);
-      return j;
-    } catch (e) {
-      if (e && e.name === 'AbortError') throw new Error('请求超时，稍后再试');
-      throw e;
-    } finally {
-      clearTimeout(timer);
+    const isSearch = path.indexOf('/api/search') === 0;
+    // 8 源并发最长 35 秒，搜索给足余量；其它接口也不再用 25 秒掐断大目录页
+    const timeout = isSearch ? 55000 : 35000;
+    const tries = (!init.method || init.method === 'GET') ? 2 : 1;
+
+    for (let i = 0; i < tries; i++) {
+      const ac = new AbortController();
+      let timedOut = false;
+      let bizError = false;
+      const timer = setTimeout(() => { timedOut = true; ac.abort(); }, timeout);
+      try {
+        const r = await fetch(path, Object.assign({}, init, {
+          signal: ac.signal, cache: 'no-store',
+        }));
+        const j = await r.json();
+        if (j && j.error) { bizError = true; throw new Error(j.error); }
+        return j;
+      } catch (e) {
+        if (bizError) throw e; // 后端业务错误，重试没有意义
+        if (timedOut) throw new Error('请求超时，书源响应较慢，点「重新搜索」再试一次');
+        const broken = (e instanceof TypeError) || NET_ERR.test(String((e && e.message) || e));
+        if (broken && i < tries - 1) {
+          await new Promise((res) => setTimeout(res, 350)); // 换一条新连接重试
+          continue;
+        }
+        if (broken) throw new Error(friendlyNet(e));
+        throw e;
+      } finally {
+        clearTimeout(timer);
+      }
     }
+    throw new Error('本地服务未响应，请重启应用');
   }
+
+  // 从后台回到前台先发一次心跳：丢弃已失效的 keep-alive 连接、唤醒本地服务
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) fetch('/api/ping', { cache: 'no-store' }).catch(() => {});
+  });
   const post = (path, body) => api(path, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
