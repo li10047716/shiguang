@@ -121,7 +121,7 @@
       items.map((it, i) => it.sep
         ? (it.label ? `<div class="gp-sep-label">${esc(it.label)}</div>` : '<div class="gp-sep"></div>')
         : `<button class="gp-item ${it.on ? 'on' : ''} ${it.danger ? 'danger' : ''}" data-i="${i}">
-        <span>${esc(it.label)}</span><span class="gp-side">${it.tagHtml || ''}${it.on ? ICONS.check : ''}</span></button>`).join('');
+        <span>${esc(it.label)}</span><span class="gp-side">${it.tagHtml || ''}<span class="gp-check">${it.on ? ICONS.check : ''}</span></span></button>`).join('');
     document.body.appendChild(el);
     const r = anchor.getBoundingClientRect();
     const w = Math.min(236, window.innerWidth - 24);
