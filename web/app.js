@@ -755,6 +755,30 @@
     if (pullH >= 34) { pullH = 0; loadUpdates(true, true); } else { pullH = 0; setPullTip(0); }
   }, { passive: true });
 
+  // 侧滑返回：从屏幕左缘向右滑 = 返回（iOS 风格）。弹窗开着只关弹窗；阅读器里按来源回溯；
+  // 漫画放大拖动中（双指/单指平移）不触发，避免和画面平移打架。
+  let edgeSw = null;
+  document.addEventListener('touchstart', (e) => {
+    edgeSw = null;
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    if (t.clientX > 30 || t.clientX < 0) return;
+    edgeSw = { x: t.clientX, y: t.clientY, fired: false };
+  }, { passive: true });
+  document.addEventListener('touchmove', (e) => {
+    if (!edgeSw || edgeSw.fired || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const dx = t.clientX - edgeSw.x, dy = t.clientY - edgeSw.y;
+    if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+    edgeSw.fired = true;
+    if (!reader.hidden && isComic() && z.s > 1) return;   // 缩放平移中放行
+    if (document.querySelector('.glass-pop')) { closePop(); return; }
+    if (!reader.hidden) { closeReader(); go(R.backHash || '#/shelf'); return; }
+    if (history.length > 1) history.back();
+    else go('#/shelf');
+  }, { passive: true });
+  ['touchend', 'touchcancel'].forEach((ev) => document.addEventListener(ev, () => { edgeSw = null; }, { passive: true }));
+
 
   let shelfManage = false;
   const shelfPicked = new Set();
