@@ -1792,7 +1792,7 @@
         { sep: true, label: '漫画' },
         ...SEARCH_SOURCES.filter(([, , t]) => t === 'comic').map(([k, n]) => pick(k, n)),
         { sep: true },
-        { label: '书源健康与开关', run: () => go('#/mine') },
+        { label: '书源健康与开关', run: () => go('#/mine?tab=source') },
       ], '选择书源');
     });
     $('#hist-clear').addEventListener('click', () => {
@@ -3465,44 +3465,70 @@
     });
   }
 
-  function viewMine() {
+  function viewMine(q) {
     setNav('mine');
+    // 分类标签：统计 / 内容 / 书源 / 设置，记住上次停留；支持 #/mine?tab=xx 直达
+    const MINE_TABS = [['stats', '统计'], ['content', '内容'], ['source', '书源'], ['setting', '设置']];
+    const tabQ = q && q.get('tab');
+    let tab = MINE_TABS.some(([k]) => k === tabQ) ? tabQ : (localStorage.getItem('sg.mine.tab') || 'stats');
+    if (!MINE_TABS.some(([k]) => k === tab)) tab = 'stats';
+    try { localStorage.setItem('sg.mine.tab', tab); } catch (_) { /* 忽略 */ }
     view.innerHTML = `
       <div class="page">
         <div class="page-head glass-head">
           <div>
             <h1 class="h1">我的</h1>
-            <div class="sub">阅读统计 · 本地书 · 备份</div>
+            <div class="sub">统计 · 内容 · 书源 · 设置</div>
           </div>
         </div>
-        <div id="mine-stats"></div>
-        <div id="mine-history"></div>
-        <div class="mine-actions glass-pill">
-          <button class="g-text" id="mine-import">导入本地书</button>
-          <i class="g-sep"></i>
-          <button class="g-text" id="mine-backup">备份</button>
-          <i class="g-sep"></i>
-          <button class="g-text" id="mine-restore">恢复</button>
+        <div class="mine-tabs glass-pill" id="mine-tabs">
+          ${MINE_TABS.map(([k, n]) => `<button class="g-text ${k === tab ? 'on' : ''}" data-mt="${k}">${n}</button>`).join('')}
         </div>
-        <div class="mine-actions glass-pill theme-pill" id="mine-theme">
-          <button class="g-text" data-theme-opt="auto">跟随系统</button>
-          <i class="g-sep"></i>
-          <button class="g-text" data-theme-opt="light">浅色</button>
-          <i class="g-sep"></i>
-          <button class="g-text" data-theme-opt="dark">深色</button>
+        <div class="mine-panel" data-tp="stats" ${tab !== 'stats' ? 'hidden' : ''}>
+          <div id="mine-stats"></div>
+          <div id="mine-history"></div>
         </div>
-        <div id="mine-marks"></div>
-        <div id="mine-local"></div>
-        <div id="mine-downloads"></div>
-        <div id="mine-cache"></div>
-        <div id="mine-lan"></div>
-        <div id="mine-health"></div>
+        <div class="mine-panel" data-tp="content" ${tab !== 'content' ? 'hidden' : ''}>
+          <div class="mine-actions glass-pill">
+            <button class="g-text" id="mine-import">导入本地书</button>
+          </div>
+          <div id="mine-marks"></div>
+          <div id="mine-local"></div>
+          <div id="mine-downloads"></div>
+        </div>
+        <div class="mine-panel" data-tp="source" ${tab !== 'source' ? 'hidden' : ''}>
+          <div id="mine-health"></div>
+        </div>
+        <div class="mine-panel" data-tp="setting" ${tab !== 'setting' ? 'hidden' : ''}>
+          <div class="mine-actions glass-pill theme-pill" id="mine-theme">
+            <button class="g-text" data-theme-opt="auto">跟随系统</button>
+            <i class="g-sep"></i>
+            <button class="g-text" data-theme-opt="light">浅色</button>
+            <i class="g-sep"></i>
+            <button class="g-text" data-theme-opt="dark">深色</button>
+          </div>
+          <div id="mine-cache"></div>
+          <div id="mine-lan"></div>
+          <div class="mine-actions glass-pill">
+            <button class="g-text" id="mine-backup">备份</button>
+            <i class="g-sep"></i>
+            <button class="g-text" id="mine-restore">恢复</button>
+          </div>
+        </div>
       </div>`;
     $('#mine-import').addEventListener('click', importLocalBook);
     $('#mine-backup').addEventListener('click', exportBackup);
     $('#mine-restore').addEventListener('click', restoreBackup);
     $('#mine-theme').querySelectorAll('[data-theme-opt]').forEach((b) => {
       b.addEventListener('click', () => setAppTheme(b.dataset.themeOpt || 'auto'));
+    });
+    $('#mine-tabs').querySelectorAll('[data-mt]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const t = b.dataset.mt;
+        try { localStorage.setItem('sg.mine.tab', t); } catch (_) { /* 忽略 */ }
+        document.querySelectorAll('.mine-panel').forEach((p) => { p.hidden = p.dataset.tp !== t; });
+        $('#mine-tabs').querySelectorAll('[data-mt]').forEach((x) => x.classList.toggle('on', x === b));
+      });
     });
     applyTheme();   // 页面重建后补一次选中态
 
@@ -3574,7 +3600,7 @@
     // 离开书架页时退出管理模式，避免下次回来还停在勾选状态
     if (page !== 'shelf' && shelfManage) exitShelfManage();
     if (page === 'shelf') viewShelf();
-    else if (page === 'mine') viewMine();
+    else if (page === 'mine') viewMine(q);
     else if (page === 'marks') viewMarks();
     else if (page === 'discover') viewDiscover(q);
     else if (page === 'list') viewList(q);

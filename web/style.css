@@ -1180,7 +1180,7 @@ html[data-theme="dark"] .kind-tag.kt-comic { background: rgba(70, 190, 155, .18)
 .h-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; background: #c6cede; }
 .h-dot.ok { background: #37b26b; box-shadow: 0 0 0 3px rgba(55, 178, 107, .14); }
 .h-dot.bad { background: #e2685c; box-shadow: 0 0 0 3px rgba(226, 104, 92, .13); }
-.h-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.h-name { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; }
 .h-name b { font-size: 13px; color: var(--ink); font-weight: 600; }
 .h-name span { font-size: 11px; color: var(--muted); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
@@ -1216,6 +1216,13 @@ html[data-theme="dark"] .kind-tag.kt-comic { background: rgba(70, 190, 155, .18)
   margin-bottom: 14px; padding: 5px;
 }
 .mine-actions .g-text { flex: 1; justify-content: center; padding: 8px 10px; }
+
+/* 我的页：分类标签栏（统计 / 内容 / 书源 / 设置） */
+.mine-tabs { display: flex; gap: 2px; margin-bottom: 14px; padding: 4px; }
+.mine-tabs .g-text { flex: 1; justify-content: center; padding: 8px 10px; color: var(--muted); }
+.mine-tabs .g-text.on { background: rgba(176, 81, 47, .13); color: var(--accent); }
+html[data-theme="dark"] .mine-tabs .g-text.on { background: rgba(232, 178, 125, .16); color: #f0b06a; }
+.mine-panel > *:last-child { margin-bottom: 0; }
 
 .stat-card {
   padding: 16px 18px 14px; margin-bottom: 14px; border-radius: 22px;
