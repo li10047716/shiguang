@@ -1990,7 +1990,7 @@
               <button class="btn" id="b-read">${p && p.i
                 ? `${isComicBook(b) ? '继续看' : '继续阅读'} · ${esc(p.t || '')}`
                 : (isComicBook(b) ? '开始看' : '开始阅读')}</button>
-              <button class="btn ghost ${on ? 'on' : ''}" id="b-shelf">${on ? '已在书架' : '加入书架'}</button>
+              <button class="btn ghost ${on ? 'on' : ''}" id="b-shelf">${on ? ICONS.check + '已在书架' : '加入书架'}</button>
               ${isLocalBook(b.id) || isComicBook(b) ? '' : `<button class="btn ghost ico-only" id="b-more" data-pop title="更多" aria-label="更多">${ICONS.dots}</button>`}
             </div>
           </div>
@@ -2025,12 +2025,12 @@
       if (isOnShelf(b.id)) {
         await removeShelf(b.id);
         shelfBtn.classList.remove('on');
-        shelfBtn.textContent = '加入书架';
+        shelfBtn.innerHTML = '加入书架';
         toast('已移出书架');
       } else {
         await addShelf(b);
         shelfBtn.classList.add('on');
-        shelfBtn.textContent = '已在书架';
+        shelfBtn.innerHTML = ICONS.check + '已在书架';
         toast('已加入书架');
       }
     });

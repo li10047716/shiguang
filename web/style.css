@@ -106,7 +106,11 @@ a { color: inherit; text-decoration: none; }
   border-color: var(--line); box-shadow: var(--shadow-s);
 }
 .btn.ghost:hover { background: var(--panel-2); color: var(--ink); }
-.btn.ghost.on { color: var(--accent-2); border-color: #e3c3b4; background: var(--accent-soft); }
+/* 已在书架：不变色（变色会压住文字），只在文字前加一个对号表示状态 */
+.btn.ghost.on svg {
+  width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.4;
+  stroke-linecap: round; stroke-linejoin: round; margin-right: 5px; vertical-align: -2px;
+}
 .btn.sm { padding: 6px 12px; font-size: 12.5px; }
 
 .row { display: flex; gap: 10px; align-items: center; }
@@ -826,7 +830,6 @@ body {
 .chip:hover { border-color: rgba(59, 123, 240, .32); color: var(--ink); }
 .chip.on { background: rgba(59, 123, 240, .18); color: var(--accent-2); border-color: rgba(59, 123, 240, .34); }
 .btn.ghost { background: var(--panel); border-color: var(--glass-line); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); }
-.btn.ghost.on { color: var(--accent-2); border-color: rgba(59, 123, 240, .34); background: var(--accent-soft); }
 .intro-box, .toc-box, .detail-top, .lan-card, .item:hover, .pager button {
   -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
 }
