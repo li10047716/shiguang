@@ -95,7 +95,9 @@
     const el = document.createElement('div');
     el.className = 'glass-pop';
     el.innerHTML = (title ? `<div class="gp-title">${esc(title)}</div>` : '') +
-      items.map((it, i) => `<button class="gp-item ${it.on ? 'on' : ''}" data-i="${i}">
+      items.map((it, i) => it.sep
+        ? '<div class="gp-sep"></div>'
+        : `<button class="gp-item ${it.on ? 'on' : ''} ${it.danger ? 'danger' : ''}" data-i="${i}">
         <span>${esc(it.label)}</span>${it.on ? ICONS.check : ''}</button>`).join('');
     document.body.appendChild(el);
     const r = anchor.getBoundingClientRect();
@@ -126,6 +128,26 @@
     if (!popEl.contains(e.target) && !anchor) closePop();
   });
   window.addEventListener('hashchange', closePop);
+
+  // 玻璃质感确认框：WKWebView / Edge --app 里原生 confirm 不可靠
+  function askConfirm(msg, okLabel, onOk) {
+    const mask = document.createElement('div');
+    mask.className = 'glass-mask';
+    mask.innerHTML = `<div class="glass-dialog">
+      <div class="gd-msg">${esc(msg)}</div>
+      <div class="gd-actions">
+        <button class="g-text" data-no>取消</button>
+        <button class="g-text danger" data-yes>${esc(okLabel)}</button>
+      </div></div>`;
+    document.body.appendChild(mask);
+    const close = () => mask.remove();
+    mask.addEventListener('click', (e) => { if (e.target === mask) close(); });
+    mask.querySelector('[data-no]').addEventListener('click', close);
+    mask.querySelector('[data-yes]').addEventListener('click', async () => {
+      close();
+      try { await onOk(); } catch (err) { toast('操作失败：' + (err && err.message || err)); }
+    });
+  }
 
   // 章节标题常自带「第十九章」，别和「第19章」重复显示
   function chapterLabel(t) {
@@ -269,25 +291,29 @@
       <div class="s">${esc(b.author || b.category || '')}</div>
     </a>`;
 
-  const shelfCard = (b) => {
+  const shelfCard = (b, mg = false, sel = false) => {
     const p = b.progress || {};
     const pct = Math.max(0, Math.min(100, Math.round((p.ratio || 0) * 100)));
-    const extra = `
-      <button class="del" data-del="${b.id}" title="移出书架">${ICONS.close}</button>
+    const extra = `${mg ? pickBox(sel) : ''}
       ${p.i ? `<div class="prog"><i style="width:${pct}%"></i></div>` : ''}`;
     const sub = p.t ? `读到 ${esc(p.t)}` : '尚未开始';
     const meta = `${b.count ? `${b.count} 章 · ` : ''}${esc(b.source || '')}书源`;
+    const tag = mg ? 'div' : 'a';
+    const attrs = mg ? `data-pick="${esc(b.id)}"` : `href="#/read/${b.id}"`;
     return `
-      <a class="card" href="#/read/${b.id}">
+      <${tag} class="card ${mg ? 'manage' : ''} ${sel ? 'picked' : ''}" ${attrs}>
         ${coverBox(b, extra)}
         <div class="t">${esc(b.title)}</div>
         <div class="s">${sub}</div>
         <div class="m">${meta}</div>
-      </a>`;
+      </${tag}>`;
   };
 
+  // 管理模式的选择圈：只在点「管理书架」后出现，替代原来卡片上的删除 ×
+  const pickBox = (sel) => `<span class="pick ${sel ? 'on' : ''}">${sel ? ICONS.check : ''}</span>`;
+
   // 图 1 的横向列表排列：封面 + 作者/章节 + 已读 + 来源 + 最近阅读 + 未读角标
-  function shelfListCard(b) {
+  function shelfListCard(b, mg = false, sel = false) {
     const p = b.progress || {};
     const readI = Number.isFinite(p.i) ? p.i + 1 : 0;
     const unread = b.count ? Math.max(0, b.count - readI) : 0;
@@ -295,9 +321,10 @@
       ? `<span class="unread ${unread >= 20 ? 'hot' : ''}">${unread > 99 ? '99+' : unread}</span>` : '';
     const src = b.source || srcNameById(b.id) || '速读谷';
     const ago = relTime(b.lastRead);
-    const extra = `<button class="del" data-del="${b.id}" title="移出书架">${ICONS.close}</button>
-      <span class="cv-tag">小说</span>`;
-    return `<a class="sl-card" href="#/read/${b.id}">
+    const extra = `${mg ? pickBox(sel) : ''}<span class="cv-tag">小说</span>`;
+    const tag = mg ? 'div' : 'a';
+    const attrs = mg ? `data-pick="${esc(b.id)}"` : `href="#/read/${b.id}"`;
+    return `<${tag} class="sl-card ${mg ? 'manage' : ''} ${sel ? 'picked' : ''}" ${attrs}>
       ${coverBox(b, extra)}
       <div class="sl-body">
         <div class="sl-title">${esc(b.title)}</div>
@@ -307,7 +334,7 @@
         <div class="sl-line sl-last">${ago ? esc(ago) + ' · ' : ''}${p.t ? `第${readI}章 ${esc(chapterLabel(p.t))}` : '暂无更新'}</div>
       </div>
       ${badge}
-    </a>`;
+    </${tag}>`;
   }
 
   // 书架工具条偏好持久化到服务端 state.settings
@@ -317,16 +344,13 @@
     saveSettings();
     viewShelf();
   }
-  function wireShelfDel(root) {
-    root.querySelectorAll('[data-del]').forEach((b) => {
-      b.addEventListener('click', async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        await removeShelf(b.dataset.del);
-        toast('已移出书架');
-        render();
-      });
-    });
+
+  // 书架管理：三点菜单进入 → 多选 → 批量移出（卡片上不再放单本删除按钮）
+  let shelfManage = false;
+  const shelfPicked = new Set();
+  function exitShelfManage() {
+    shelfManage = false;
+    shelfPicked.clear();
   }
 
   const pager = (page, pages, cb) => {
@@ -365,6 +389,7 @@
     const sort = shelfPref('shelfSort', 'recent');
     const filter = shelfPref('shelfFilter', 'all');
     const all = Object.values(state.shelf);
+    if (shelfManage && !all.length) exitShelfManage();
     let books = filter === 'all' ? all.slice()
       : all.filter((b) => (b.source || srcNameById(b.id)) === filter);
     books.sort((a, b) => {
@@ -375,11 +400,22 @@
     const sources = [...new Set(all.map((b) => b.source || srcNameById(b.id)).filter(Boolean))];
     const body = books.length
       ? layout === 'list'
-        ? `<div class="shelf-list">${books.map(shelfListCard).join('')}</div>`
-        : `<div class="grid">${books.map(shelfCard).join('')}</div>`
+        ? `<div class="shelf-list">${books.map((b) => shelfListCard(b, shelfManage, shelfPicked.has(b.id))).join('')}</div>`
+        : `<div class="grid">${books.map((b) => shelfCard(b, shelfManage, shelfPicked.has(b.id))).join('')}</div>`
       : `<div class="empty"><div class="ic">📚</div>
            <p>书架还是空的<br>去「发现」找一本喜欢的书吧</p>
            <a class="btn" href="#/discover">去逛逛</a></div>`;
+
+    // 管理条：只统计当前筛选下可见的书，避免误删被筛掉的条目
+    const pickedIds = shelfManage ? books.filter((b) => shelfPicked.has(b.id)).map((b) => b.id) : [];
+    const pickedN = pickedIds.length;
+    const manageBar = shelfManage ? `<div class="manage-bar">
+      <span class="mb-count">已选 <b>${pickedN}</b> 本</span>
+      <div class="mb-actions">
+        <button class="g-text sm" id="mg-all">${books.length && pickedN === books.length ? '取消全选' : '全选'}</button>
+        <button class="g-text sm danger" id="mg-del" ${pickedN ? '' : 'disabled'}>删除</button>
+        <button class="g-text sm" id="mg-done">完成</button>
+      </div></div>` : '';
 
     view.innerHTML = `
       <div class="page">
@@ -393,9 +429,10 @@
             <i class="g-sep"></i>
             <button class="g-ico" id="shelf-layout" title="${layout === 'list' ? '切换为网格' : '切换为列表'}">${layout === 'list' ? ICONS.grid : ICONS.list}</button>
             <a class="g-ico" href="#/search" title="搜索" aria-label="搜索">${ICONS.search}</a>
-            <button class="g-ico" id="shelf-more" data-pop title="排序方式">${ICONS.dots}</button>
+            <button class="g-ico" id="shelf-more" data-pop title="书架选项">${ICONS.dots}</button>
           </div>
         </div>
+        ${manageBar}
         ${body}
       </div>`;
 
@@ -404,9 +441,11 @@
     });
     $('#shelf-filter').addEventListener('click', (e) => {
       e.stopPropagation();
+      const clearPick = () => { shelfPicked.clear(); };
       togglePop(e.currentTarget, 'shelf-filter', [
-        { label: '全部', on: filter === 'all', run: () => setShelfPref('shelfFilter', 'all') },
-        ...sources.map((s) => ({ label: s, on: filter === s, run: () => setShelfPref('shelfFilter', s) })),
+        { label: '全部', on: filter === 'all', run: () => { clearPick(); setShelfPref('shelfFilter', 'all'); } },
+        ...sources.map((s) => ({ label: s, on: filter === s,
+          run: () => { clearPick(); setShelfPref('shelfFilter', s); } })),
       ], '按书源筛选');
     });
     $('#shelf-more').addEventListener('click', (e) => {
@@ -415,9 +454,43 @@
         { label: '最近阅读', on: sort === 'recent', run: () => setShelfPref('shelfSort', 'recent') },
         { label: '按书名', on: sort === 'title', run: () => setShelfPref('shelfSort', 'title') },
         { label: '加入时间', on: sort === 'added', run: () => setShelfPref('shelfSort', 'added') },
-      ], '排序方式');
+        { sep: true },
+        { label: shelfManage ? '退出管理' : '管理书架', run: () => {
+          if (shelfManage) exitShelfManage();
+          else { shelfManage = true; shelfPicked.clear(); }
+          viewShelf();
+        } },
+      ], '书架选项');
     });
-    wireShelfDel(view);
+
+    if (shelfManage) {
+      view.querySelectorAll('[data-pick]').forEach((el) => {
+        el.addEventListener('click', () => {
+          const id = el.dataset.pick;
+          if (shelfPicked.has(id)) shelfPicked.delete(id); else shelfPicked.add(id);
+          viewShelf();
+        });
+      });
+      $('#mg-all').addEventListener('click', () => {
+        if (books.length && pickedN === books.length) shelfPicked.clear();
+        else books.forEach((b) => shelfPicked.add(b.id));
+        viewShelf();
+      });
+      $('#mg-del').addEventListener('click', () => {
+        if (!pickedN) return;
+        askConfirm(
+          `确定从书架移出这 ${pickedN} 本书吗？阅读进度会保留，以后可以重新加入。`,
+          `删除 ${pickedN} 本`,
+          async () => {
+            for (const id of pickedIds) await removeShelf(id);
+            shelfPicked.clear();
+            if (!Object.keys(state.shelf).length) exitShelfManage();
+            toast(`已移出 ${pickedN} 本书`);
+            render();
+          });
+      });
+      $('#mg-done').addEventListener('click', () => { exitShelfManage(); viewShelf(); });
+    }
 
     // 老条目没有章节数：借服务端的目录缓存补一次，补完刷新
     const missing = all.filter((b) => !b.count);
@@ -1781,6 +1854,8 @@
     document.body.style.overflow = ''; // 阅读器使用独立滚动容器
     // 搜索页像图 2 一样是沉浸式整页，收起底部标签栏
     document.body.classList.toggle('no-tabbar', page === 'search');
+    // 离开书架页时退出管理模式，避免下次回来还停在勾选状态
+    if (page !== 'shelf' && shelfManage) exitShelfManage();
     if (page === 'shelf') viewShelf();
     else if (page === 'sub') viewSub();
     else if (page === 'mine') viewMine();

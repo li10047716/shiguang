@@ -169,13 +169,6 @@ a { color: inherit; text-decoration: none; }
 .item .typo { font-size: 26px; letter-spacing: 0; }
 .hero .typo { font-size: 38px; }
 .detail-main .typo { font-size: 56px; }
-.card .del {
-  position: absolute; top: 7px; right: 7px; width: 26px; height: 26px; border-radius: 8px;
-  background: rgba(30, 22, 15, .55); color: #fff; border: 0; display: grid; place-items: center;
-  opacity: 0; transition: opacity .16s; backdrop-filter: blur(4px);
-}
-.card:hover .del { opacity: 1; }
-.card .del svg { width: 14px; height: 14px; }
 .card .prog {
   position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255, 255, 255, .22);
 }
@@ -649,13 +642,12 @@ a { color: inherit; text-decoration: none; }
   .page-head { margin-bottom: 16px; gap: 10px; align-items: center; }
   .page-head .sub { font-size: 11.5px; }
 
-  /* 书架卡片：一行 3 本，删除按钮常显（触屏没有 hover） */
+  /* 书架卡片：一行 3 本 */
   .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 11px; }
   .card .t { font-size: 12px; margin-top: 7px; }
   .card .s { font-size: 10.5px; }
   .card .m { font-size: 10px; }
   .card:hover .cover { transform: none; }
-  .card .del { opacity: 1; width: 27px; height: 27px; top: 5px; right: 5px; }
   .typo { font-size: 34px; }
 
   /* 搜索栏：整体收窄，输入框 16px 防 iOS 自动放大 */
@@ -917,6 +909,8 @@ body {
 .gp-item:hover { background: rgba(120, 150, 220, .14); }
 .gp-item.on { color: var(--accent-2); font-weight: 600; background: var(--accent-soft); }
 .gp-item svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.gp-sep { height: 1px; margin: 6px 10px; background: rgba(120, 145, 190, .24); }
+.gp-item.danger { color: #d3483a; }
 
 /* ---- 书架横向列表（图 1） ---- */
 .shelf-list { display: flex; flex-direction: column; gap: 12px; }
@@ -945,14 +939,6 @@ body {
   font-size: 10px; font-weight: 600; letter-spacing: .5px;
 }
 .cv-tag.done { background: rgba(38, 54, 80, .74); }
-.sl-card .del {
-  position: absolute; z-index: 2; top: 5px; right: 5px;
-  width: 22px; height: 22px; border-radius: 50%; border: 0;
-  background: rgba(25, 35, 55, .58); color: #fff; display: grid; place-items: center;
-  opacity: 0; transition: opacity .16s;
-}
-.sl-card:hover .del { opacity: 1; }
-.sl-card .del svg { width: 12px; height: 12px; }
 .sl-body { flex: 1; min-width: 0; padding-right: 28px; display: flex; flex-direction: column; gap: 2px; }
 .sl-title { font-size: 15.5px; font-weight: 700; color: var(--ink); margin: 2px 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sl-line { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -964,6 +950,62 @@ body {
   font-variant-numeric: tabular-nums;
 }
 .unread.hot { background: #f26a5a; color: #fff; box-shadow: 0 3px 10px rgba(242, 106, 90, .32); }
+
+
+/* ---- 书架管理：三点菜单进入 → 多选 → 批量移出 ---- */
+.manage-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 10px 8px 16px; margin: 0 0 14px; border-radius: 999px;
+  background: rgba(255, 255, 255, .74); border: 1px solid var(--glass-line);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow);
+}
+.mb-count { font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+.mb-count b { font-size: 15px; color: var(--accent-2); }
+.mb-actions { display: flex; align-items: center; gap: 2px; }
+.g-text.sm { font-size: 12.5px; padding: 6px 12px; }
+.g-text.danger { color: #d3483a; }
+.g-text:disabled { opacity: .38; cursor: default; }
+.g-text:disabled:hover { background: transparent; }
+
+/* 选择圈：仅管理模式出现，替代卡片右上角的删除 × */
+.pick {
+  position: absolute; z-index: 3; top: 6px; right: 6px;
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 2px solid #fff; background: rgba(25, 35, 55, .3);
+  box-shadow: 0 2px 8px rgba(25, 35, 55, .28);
+  display: grid; place-items: center; color: #fff;
+}
+.pick svg { width: 13px; height: 13px; stroke-width: 2.6; }
+.pick.on { background: var(--accent-2); }
+.card.manage, .sl-card.manage { cursor: pointer; }
+.card.picked .cover { box-shadow: 0 0 0 3px var(--accent-2), 0 6px 18px rgba(35, 62, 110, .18); }
+.sl-card.picked {
+  background: rgba(255, 255, 255, .86);
+  box-shadow: 0 0 0 2px var(--accent-soft), var(--glass-shadow);
+}
+.card.picked:hover .cover, .sl-card.picked:hover { transform: none; }
+
+/* 确认弹层：WKWebView 里原生 confirm 不可靠 */
+.glass-mask {
+  position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 24px;
+  background: rgba(28, 42, 70, .3);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.glass-dialog {
+  width: min(320px, 100%); padding: 22px 20px 14px; border-radius: 22px;
+  background: rgba(255, 255, 255, .96); border: 1px solid #fff;
+  box-shadow: 0 24px 60px rgba(35, 62, 110, .3); text-align: center;
+  animation: popScale .16s ease;
+}
+.gd-msg { font-size: 14.5px; line-height: 1.7; color: var(--ink); }
+.gd-actions { display: flex; gap: 8px; justify-content: center; margin-top: 18px; }
+.gd-actions .g-text {
+  flex: 1; justify-content: center; padding: 10px 12px; border-radius: 999px;
+  background: rgba(120, 150, 220, .12); font-weight: 600;
+}
+.gd-actions .g-text.danger { background: #f26a5a; color: #fff; }
+.gd-actions .g-text.danger:hover { background: #e25c4c; color: #fff; }
 
 /* ---- 发现页（图 3） ---- */
 .cat-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -1038,7 +1080,9 @@ body {
   .sk-cover { width: 64px; height: 88px; flex-basis: 64px; }
   .sl-title, .dc-title { font-size: 14.5px; }
   .sl-line, .dc-author, .dc-line, .dc-latest { font-size: 11.8px; }
-  .sl-card .del { opacity: 1; }
+  .manage-bar { padding: 7px 8px 7px 14px; border-radius: 18px; }
+  .g-text.sm { padding: 6px 10px; font-size: 12px; }
+  .pick { width: 20px; height: 20px; top: 5px; right: 5px; }
   .unread { right: 10px; top: 10px; min-width: 22px; height: 22px; font-size: 11px; }
   .shelf-list, .disc-list { gap: 11px; }
   .glass-topbar { margin-bottom: 12px; gap: 8px; }
