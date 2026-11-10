@@ -36,7 +36,7 @@ if sys.platform in ("ios", "android") or os.environ.get("SUDUGU_EMBEDDED"):
     _ca = os.path.join(ROOT, "cacert.pem")
     if os.path.exists(_ca):
         os.environ.setdefault("SSL_CERT_FILE", _ca)
-from reader import ali, bc, blxs, core, dq, qbxs, qm, shuqi, net  # noqa: E402
+from reader import ali, bc, blxs, core, dq, qbxs, qm, shuqi, net, localbook  # noqa: E402
 
 # 统一网络层：证书链兼容、gzip 解压、默认超时、可读错误（对全部书源生效）
 net.install()
@@ -89,6 +89,8 @@ def load_state():
     st.setdefault("progress", {})
     st.setdefault("settings", {})
     st.setdefault("history", [])
+    st.setdefault("marks", [])
+    st.setdefault("stats", {"days": {}})
     return st
 
 
@@ -109,6 +111,8 @@ def api_home():
 
 
 def api_book(bid, refresh=False):
+    if localbook.is_local(bid):
+        return localbook.book(bid)
     key = "book_%s" % bid
     if not refresh:
         data = cache_get(key, ttl=900)
@@ -157,10 +161,14 @@ def chapter_key(url, with_bid=False):
 
 
 def chapter_cached(url):
+    if localbook.is_local(url):
+        return True   # 本地书的正文本来就在磁盘上
     return os.path.isfile(os.path.join(CACHE, _cache_name(chapter_key(url)) + ".json"))
 
 
 def api_chapter(url):
+    if localbook.is_local(url):
+        return localbook.chapter(url)
     key, bid = chapter_key(url, True)
     data = cache_get(key)
     if data:
@@ -275,6 +283,13 @@ def cache_status():
     """书架里每本书的章节缓存情况（只读磁盘，不联网）。"""
     out = {}
     for bid in (load_state().get("shelf") or {}):
+        if localbook.is_local(bid):
+            try:
+                n = len(localbook.book(bid).get("chapters") or [])
+            except Exception:  # noqa: BLE001
+                n = 0
+            out[bid] = {"cached": n, "upto": n, "total": n}
+            continue
         book = cache_get("book_%s" % bid) or {}
         chapters = book.get("chapters") or []
         keys = [chapter_key(c.get("u") or "") for c in chapters]
@@ -292,6 +307,8 @@ _PF_LOCK = threading.Lock()
 
 def start_prefetch(bid, start=0, count=8):
     """后台预取后续章节，只补没缓存的；已缓存 / 正在抓取的都会跳过。"""
+    if localbook.is_local(bid):
+        return {"ok": True, "queued": 0}   # 本地书不用预取
     book = cache_get("book_%s" % bid)
     if not book:
         return {"ok": False, "queued": 0}
@@ -396,6 +413,8 @@ _DL_LOCK = threading.Lock()
 
 def start_download(bid):
     """后台线程批量抓取全部章节，写进章节缓存 = 离线可读。已缓存的秒回。"""
+    if localbook.is_local(bid):
+        return {"status": "local", "total": 0, "done": 0, "failed": 0}
     book = api_book(bid)
     chapters = book.get("chapters") or []
     with _DL_LOCK:
@@ -981,6 +1000,177 @@ def api_img(url):
             _IMG_BUSY.discard(name)
 
 
+# ------------------------------------------------------------------ 本地书 / 书签 / 备份 / 统计
+
+def _today(offset=0):
+    return time.strftime("%Y-%m-%d", time.localtime(time.time() + offset * 86400))
+
+
+def api_local_import(name, raw):
+    """导入 TXT / EPUB：解析后落盘，顺手放进书架（用户选的文件就是要读的）。"""
+    book = localbook.import_bytes(name, raw)
+    with _LOCK:
+        st = load_state()
+        cur = st["shelf"].get(book["id"], {})
+        cur.update({
+            "id": book["id"], "title": book["title"], "author": book["author"],
+            "cover": "", "source": localbook.SRC_NAME, "count": book["count"],
+            "category": book.get("category") or "本地导入",
+        })
+        cur.setdefault("added", time.time())
+        st["shelf"][book["id"]] = cur
+        save_state(st)
+    out = dict(book)
+    out["chapters"] = book.get("chapters") or []
+    return {"ok": True, "book": out, "shelf": st["shelf"]}
+
+
+def api_local_delete(bid):
+    removed = localbook.delete(bid)
+    with _LOCK:
+        st = load_state()
+        st["shelf"].pop(bid, None)
+        st["progress"].pop(bid, None)
+        st["marks"] = [m for m in st.get("marks") or [] if m.get("bookId") != bid]
+        save_state(st)
+    return {"ok": True, "removed": removed, "shelf": st["shelf"], "marks": st["marks"]}
+
+
+def _mark_id(m):
+    raw = "|".join(str(m.get(k) or "") for k in ("bookId", "u", "type", "text", "page"))
+    return hashlib.sha1(raw.encode("utf-8", "ignore")).hexdigest()[:12]
+
+
+def api_mark(body):
+    op = body.get("op") or "add"
+    m = body.get("mark") or {}
+    with _LOCK:
+        st = load_state()
+        marks = st.get("marks") or []
+        if op == "remove":
+            mid = str(body.get("id") or m.get("id") or "")
+            marks = [x for x in marks if x.get("id") != mid]
+        else:
+            item = {
+                "id": m.get("id") or "",
+                "bookId": str(m.get("bookId") or ""),
+                "bookTitle": str(m.get("bookTitle") or ""),
+                "i": int(m.get("i") or 0),
+                "t": str(m.get("t") or ""),
+                "u": str(m.get("u") or ""),
+                "page": int(m.get("page") or 1),
+                "ratio": float(m.get("ratio") or 0),
+                "type": "note" if m.get("type") == "note" else "bookmark",
+                "text": str(m.get("text") or "")[:400],
+                "note": str(m.get("note") or "")[:1000],
+                "ts": time.time(),
+            }
+            if not item["bookId"]:
+                return {"ok": False, "error": "缺少书籍 id"}
+            item["id"] = item["id"] or _mark_id(item)
+            marks = [x for x in marks if x.get("id") != item["id"]]
+            marks.insert(0, item)
+        st["marks"] = marks[:500]
+        save_state(st)
+    return {"ok": True, "marks": st["marks"]}
+
+
+def stats_snapshot():
+    st = load_state()
+    days = ((st.get("stats") or {}).get("days") or {})
+    today = _today()
+    d0 = days.get(today) or {}
+
+    def sec_of(v):
+        return float((v or {}).get("sec") or 0)
+
+    total_sec = int(sum(sec_of(v) for v in days.values()))
+    total_ch = int(sum(int((v or {}).get("ch") or 0) for v in days.values()))
+
+    # 今天还没读就先从昨天算，避免早上打开只看 0 天
+    streak, start = 0, (0 if (sec_of(d0) >= 30 or (d0.get("ch") or 0) > 0) else 1)
+    for i in range(start, 400):
+        v = days.get(_today(-i)) or {}
+        if sec_of(v) >= 30 or (v.get("ch") or 0) > 0:
+            streak += 1
+        else:
+            break
+
+    recent = []
+    for i in range(13, -1, -1):
+        d = _today(-i)
+        v = days.get(d) or {}
+        recent.append({"d": d, "sec": int(sec_of(v)), "ch": int(v.get("ch") or 0)})
+    return {
+        "today": {"sec": int(sec_of(d0)), "ch": int(d0.get("ch") or 0)},
+        "total": {"sec": total_sec, "ch": total_ch, "days": sum(1 for v in days.values()
+                                                                if sec_of(v) >= 30 or (v.get("ch") or 0) > 0)},
+        "streak": streak,
+        "recent": recent,
+    }
+
+
+BACKUP_KEYS = ("shelf", "progress", "settings", "marks", "history", "stats", "downloads")
+
+
+def backup_data():
+    st = load_state()
+    return {"app": "shiguang", "version": 1, "exported": time.time(),
+            "state": {k: st.get(k) for k in BACKUP_KEYS}}
+
+
+def restore_data(data, mode="merge"):
+    """导入备份：merge 只补不改（冲突时保留更新时间较新的），replace 直接覆盖。"""
+    if not isinstance(data, dict):
+        raise ValueError("备份文件格式不对")
+    src = data.get("state") if isinstance(data.get("state"), dict) else data
+    if not isinstance(src, dict):
+        raise ValueError("备份文件里没有可恢复的数据")
+    with _LOCK:
+        st = load_state()
+        if mode == "replace":
+            for k in BACKUP_KEYS:
+                if k in src and isinstance(src[k], type(st.get(k))):
+                    st[k] = src[k]
+        else:
+            for k in ("shelf", "progress"):
+                dst = st.get(k) or {}
+                for bid, item in (src.get(k) or {}).items():
+                    if not isinstance(item, dict):
+                        continue
+                    cur = dst.get(bid)
+                    newer = (item.get("lastRead") or item.get("ts") or 0) >= \
+                            ((cur or {}).get("lastRead") or (cur or {}).get("ts") or 0)
+                    if cur is None or newer:
+                        dst[bid] = {**(cur or {}), **item}
+                st[k] = dst
+            st["settings"] = {**(st.get("settings") or {}), **(src.get("settings") or {})}
+            marks = st.get("marks") or []
+            have = {m.get("id") for m in marks}
+            for m in (src.get("marks") or []):
+                if isinstance(m, dict) and m.get("id") not in have:
+                    marks.append(m)
+            st["marks"] = marks[:500]
+            hist = st.get("history") or []
+            seen = {h.get("bookId") for h in hist}
+            for h in (src.get("history") or []):
+                if isinstance(h, dict) and h.get("bookId") not in seen:
+                    hist.append(h)
+            st["history"] = sorted(hist, key=lambda x: -(x.get("ts") or 0))[:60]
+            days = ((st.get("stats") or {}).get("days") or {})
+            for d, v in (((src.get("stats") or {}).get("days")) or {}).items():
+                if not isinstance(v, dict):
+                    continue
+                cur = days.get(d) or {}
+                days[d] = {"sec": max(float(cur.get("sec") or 0), float(v.get("sec") or 0)),
+                           "ch": max(int(cur.get("ch") or 0), int(v.get("ch") or 0))}
+            st["stats"] = {"days": days}
+        st.setdefault("marks", [])
+        st.setdefault("stats", {"days": {}})
+        save_state(st)
+    return {"ok": True, "state": st, "mode": mode}
+
+
 # ------------------------------------------------------------------ HTTP
 
 MIME = {
@@ -1128,6 +1318,14 @@ class Handler(BaseHTTPRequestHandler):
                                "lan": self.server.server_address[0] == "0.0.0.0"})
         if path == "/api/state":
             return self._json(load_state())
+        if path == "/api/local/list":
+            return self._json({"books": localbook.list_books()})
+        if path == "/api/marks":
+            return self._json({"marks": load_state().get("marks") or []})
+        if path == "/api/stats":
+            return self._json(stats_snapshot())
+        if path == "/api/backup":
+            return self._json(backup_data())
         if path == "/api/ping":
             LAST_PING[0] = time.time()
             PING_SEEN[0] = True
@@ -1155,10 +1353,30 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlsplit(self.path).path
         try:
             n = int(self.headers.get("Content-Length") or 0)
-            body = json.loads(self.rfile.read(n) or b"{}")
+            raw = self.rfile.read(n) if n else b""
+        except Exception:  # noqa: BLE001
+            raw = b""
+        # 导入书籍是文件二进制，直接在原始 body 上收，不做 JSON 解析
+        if path == "/api/local/import":
+            try:
+                name = self._arg("name") or "未命名.txt"
+                return self._json(api_local_import(name, raw))
+            except Exception as e:  # noqa: BLE001
+                return self._err(str(e))
+        try:
+            body = json.loads(raw or b"{}")
         except Exception:  # noqa: BLE001
             body = {}
         try:
+            if path == "/api/local/delete":
+                bid = str(body.get("bookId") or "")
+                if not bid:
+                    return self._err("缺少书籍 id")
+                return self._json(api_local_delete(bid))
+            if path == "/api/mark":
+                return self._json(api_mark(body))
+            if path == "/api/restore":
+                return self._json(restore_data(body.get("data"), body.get("mode") or "merge"))
             if path == "/api/shelf":
                 return self._shelf(body)
             if path == "/api/download":
@@ -1237,6 +1455,22 @@ class Handler(BaseHTTPRequestHandler):
             hist = [h for h in st["history"] if h.get("bookId") != bid]
             hist.insert(0, {"bookId": bid, "u": item["u"], "t": item["t"], "ts": item["ts"]})
             st["history"] = hist[:60]
+
+            # 阅读统计：前端每隔一段时间带上这段时间读了多少秒
+            try:
+                sec = max(0.0, min(600.0, float(body.get("sec") or 0)))
+            except (TypeError, ValueError):
+                sec = 0.0
+            if sec >= 1 or body.get("chNew"):
+                days = st.setdefault("stats", {}).setdefault("days", {})
+                day = days.setdefault(_today(), {"sec": 0, "ch": 0})
+                day["sec"] = round(float(day.get("sec") or 0) + sec, 1)
+                if body.get("chNew"):
+                    day["ch"] = int(day.get("ch") or 0) + 1
+                # 只保留最近一年，别让 state.json 无限长
+                if len(days) > 400:
+                    for key in sorted(days)[:-400]:
+                        days.pop(key, None)
             save_state(st)
         return self._json({"ok": True})
 

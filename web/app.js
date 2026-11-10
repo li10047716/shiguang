@@ -6,7 +6,7 @@
   const view = $('#view');
   const reader = $('#reader');
 
-  const state = { shelf: {}, progress: {}, settings: {}, history: [], home: null };
+  const state = { shelf: {}, progress: {}, settings: {}, history: [], home: null, marks: [] };
   const bookCache = new Map();
   const RANK_SEQ = [0];   // 榜单请求序号，防止快速切换标签时旧响应覆盖新内容
   const LIST_SEQ = [0];
@@ -60,7 +60,9 @@
     '八一中文网': ['bl', '八一'],
     '得奇小说网': ['dq', '得奇'],
     '爱丽丝书屋': ['ali', '爱丽丝'],
+    '本地导入': ['loc', '本地'],
   };
+  const isLocalBook = (id) => String(id || '').startsWith('loc:');
   const srcBadge = (source, always = false) => {
     const meta = SRC_META[source];
     if (!meta) return '';
@@ -130,14 +132,14 @@
   window.addEventListener('hashchange', closePop);
 
   // 玻璃质感确认框：WKWebView / Edge --app 里原生 confirm 不可靠
-  function askConfirm(msg, okLabel, onOk) {
+  function askConfirm(msg, okLabel, onOk, variant = 'danger') {
     const mask = document.createElement('div');
     mask.className = 'glass-mask';
     mask.innerHTML = `<div class="glass-dialog">
       <div class="gd-msg">${esc(msg)}</div>
       <div class="gd-actions">
         <button class="g-text" data-no>取消</button>
-        <button class="g-text danger" data-yes>${esc(okLabel)}</button>
+        <button class="g-text ${variant}" data-yes>${esc(okLabel)}</button>
       </div></div>`;
     document.body.appendChild(mask);
     const close = () => mask.remove();
@@ -181,9 +183,136 @@
     post('/api/prefetch', { bookId: key, from, count }).catch(() => {});
   }
 
+  // ---- 书签 / 划线 / 笔记：全部存在本地 state.marks 里 ----
+  const marksOf = (bookId) => (state.marks || []).filter((m) => m.bookId === bookId);
+  const markOfChapter = (bookId, u, type = 'bookmark') =>
+    (state.marks || []).find((m) => m.bookId === bookId && m.u === u && m.type === type);
+
+  async function saveMark(mark) {
+    const r = await post('/api/mark', { op: 'add', mark });
+    if (r && r.marks) state.marks = r.marks;
+    return r;
+  }
+  async function removeMark(id) {
+    const r = await post('/api/mark', { op: 'remove', id });
+    if (r && r.marks) state.marks = r.marks;
+    return r;
+  }
+
+  // ---- 文件选择：导入书籍 / 恢复备份共用（iOS 要求 input 在 DOM 里并同步触发） ----
+  function chooseFile(accept) {
+    return new Promise((resolve) => {
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = accept;
+      inp.style.cssText = 'position:fixed;left:-9999px;width:1px;height:1px;opacity:0';
+      document.body.appendChild(inp);
+      let done = false;
+      const finish = (f) => {
+        if (done) return;
+        done = true;
+        inp.remove();
+        resolve(f || null);
+      };
+      inp.addEventListener('change', () => finish(inp.files && inp.files[0]));
+      // 用户点「取消」时不会有 change 事件，靠窗口重新获得焦点兜底
+      window.addEventListener('focus', () => setTimeout(() => finish(null), 1200), { once: true });
+      setTimeout(() => finish(null), 180000);   // 兜底清理，别把隐藏 input 一直挂在 DOM 上
+      inp.click();
+    });
+  }
+
+  async function importLocalBook() {
+    const f = await chooseFile('.txt,.epub,text/plain,application/epub+zip');
+    if (!f) return;
+    if (f.size > 40 * 1024 * 1024) { toast('文件超过 40MB，请先拆分再导入'); return; }
+    busy(true);
+    toast('正在解析，稍等…');
+    try {
+      const buf = await f.arrayBuffer();
+      const r = await fetch('/api/local/import?name=' + encodeURIComponent(f.name), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: buf,
+        cache: 'no-store',
+      });
+      const j = await r.json();
+      if (j.error) throw new Error(j.error);
+      if (j.shelf) state.shelf = j.shelf;
+      toast(`已导入《${j.book.title}》· ${j.book.chapters.length} 章`);
+      viewMine();
+    } catch (e) {
+      toast('导入失败：' + (e && e.message || e));
+    } finally {
+      busy(false);
+    }
+  }
+
+  async function exportBackup() {
+    busy(true);
+    try {
+      const d = await api('/api/backup');
+      const name = `拾光备份-${new Date().toISOString().slice(0, 10)}.json`;
+      const blob = new Blob([JSON.stringify(d)], { type: 'application/json' });
+      const file = new File([blob], name, { type: 'application/json' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: '拾光阅读器备份' });
+          toast('备份已导出');
+          return;
+        } catch (err) {
+          if (err && err.name === 'AbortError') return;
+        }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      toast('备份文件已保存');
+    } catch (e) {
+      toast('导出失败：' + (e && e.message || e));
+    } finally {
+      busy(false);
+    }
+  }
+
+  async function restoreBackup() {
+    const f = await chooseFile('.json,application/json');
+    if (!f) return;
+    let data;
+    try {
+      data = JSON.parse(await f.text());
+    } catch (e) {
+      toast('这个文件不是拾光的备份');
+      return;
+    }
+    const src = (data && data.state) || data || {};
+    const n = Object.keys(src.shelf || {}).length;
+    if (!n && !(src.marks || []).length) { toast('备份里没有可恢复的内容'); return; }
+    askConfirm(`导入备份：${n} 本书（书架、进度、书签、设置）。同名的书保留阅读进度较新的那份。`,
+      '开始恢复', async () => {
+        busy(true);
+        try {
+          const r = await post('/api/restore', { data, mode: 'merge' });
+          Object.assign(state, r.state || {});
+          toast('恢复完成');
+          render();
+        } catch (e) {
+          toast('恢复失败：' + (e && e.message || e));
+        } finally {
+          busy(false);
+        }
+      }, 'ok');
+  }
+
   // ---- 一键换源：书名 + 作者匹配其它书源，切换后迁移阅读进度 ----
   async function openSourceSwitch(b, inReader) {
     if (!b || !b.id) return;
+    if (isLocalBook(b.id)) { toast('本地导入的书不用换源'); return; }
     busy(true);
     let d;
     try {
@@ -1411,14 +1540,14 @@
               <span class="tag">${chapters.length} 章</span>
               ${b.words ? `<span class="tag">${esc(b.words)}</span>` : ''}
               ${b.updated && b.source !== '七猫' ? `<span class="tag">更新 ${esc(b.updated)}</span>` : ''}
-              <span class="tag src">${esc(b.source || '速读谷')}书源</span>
+              <span class="tag src">${isLocalBook(b.id) ? '本地导入' : `${esc(b.source || '速读谷')}书源`}</span>
             </div>
             <div class="who">作者：<b>${esc(b.author || '佚名')}</b>
               ${b.publisher ? `<span class="who-src">版权方：${esc(b.publisher)}</span>` : ''}</div>
             <div class="actions">
               <button class="btn" id="b-read">${p && p.i ? `继续阅读 · ${esc(p.t || '')}` : '开始阅读'}</button>
               <button class="btn ghost ${on ? 'on' : ''}" id="b-shelf">${on ? '已在书架' : '加入书架'}</button>
-              <button class="btn ghost ico-only" id="b-more" data-pop title="更多" aria-label="更多">${ICONS.dots}</button>
+              ${isLocalBook(b.id) ? '' : `<button class="btn ghost ico-only" id="b-more" data-pop title="更多" aria-label="更多">${ICONS.dots}</button>`}
             </div>
           </div>
         </div>
@@ -1439,7 +1568,7 @@
       </div>
     </div>`;
 
-    $('#b-more').addEventListener('click', (e) => {
+    $('#b-more')?.addEventListener('click', (e) => {
       e.stopPropagation();
       openSourceSwitch(b, false);
     });
@@ -1482,6 +1611,7 @@
   const R = {
     book: null, chapters: [], index: 0, chapter: null, saveTimer: null, lastSave: 0,
     page: 1, pages: 1, pw: 0, // 分页状态：当前页 / 总页数 / 页宽
+    sec: 0, chNew: false, clock: null, // 阅读计时（秒）/ 是否刚换章
   };
 
   const rEl = {
@@ -1573,6 +1703,19 @@
     relayout(); // 字号/行距/页宽变化后重新分页
   }
 
+  // 阅读计时：只在阅读器可见且页面在前台时累加，用于「我的」里的阅读统计
+  function stopClock() {
+    if (R.clock) { clearInterval(R.clock); R.clock = null; }
+  }
+  function startClock() {
+    stopClock();
+    R.clock = setInterval(() => {
+      if (reader.hidden || document.hidden || !R.chapter) return;
+      R.sec += 5;
+      if (R.sec >= 120) saveProgress(true);   // 读得久也定期落一次，别等关闭才写
+    }, 5000);
+  }
+
   async function openReader(bookId, index) {
     const b = bookCache.get(bookId) || state.shelf[bookId];
     busy(true);
@@ -1594,6 +1737,7 @@
         setTimeout(() => toast('点屏幕中间呼出菜单，两侧点击翻页'), 900);
       }
         await loadChapter(i, index == null && p && p.u === R.chapters[i]?.u ? p.ratio : 0);
+      startClock();
       startPrefetch(bookId, i, 10);   // 打开就补当前章往后 10 章
     } catch (e) {
       toast('打开失败：' + e.message);
@@ -1623,10 +1767,12 @@
       return;
     }
     R.chapter = data;
+    R.chNew = true;
     rEl.article.innerHTML =
       `<h1>${esc(data.title || c.t)}</h1>` +
       data.paras.map((p) => `<p>${esc(p)}</p>`).join('');
     rEl.article.appendChild(rEl.end);
+    applyHighlights();
     layout();
     const target = restoreRatio > 0 && R.pages > 1
       ? Math.round(restoreRatio * (R.pages - 1)) + 1 : 1;
@@ -1637,6 +1783,134 @@
       startPrefetch(R.book.id, i + 1, 8);
     }
   }
+
+  // ---- 划线高亮：按段落开头 18 字匹配，切章再回来也能对上 ----
+  function applyHighlights() {
+    if (!R.book || !R.chapter) return;
+    const u = R.chapter.url || R.chapters[R.index]?.u;
+    const notes = marksOf(R.book.id).filter((m) => m.type === 'note' && m.u === u);
+    if (!notes.length) return;
+    const paras = Array.from(rEl.article.querySelectorAll('p'));
+    notes.forEach((n) => {
+      const key = String(n.text || '').slice(0, 18);
+      if (!key) return;
+      const hit = paras.find((p) => p.textContent.indexOf(key) >= 0);
+      if (!hit || hit.classList.contains('noted')) return;
+      hit.classList.add('noted');
+      hit.dataset.mark = n.id;
+      // 只给被划的那几行加底色，别整段拉一条横贯全宽的色带
+      const full = hit.textContent;
+      const at = full.indexOf(key);
+      const len = Math.min(full.length - at, (String(n.text || '') || key).length);
+      if (at >= 0 && len > 0) {
+        hit.innerHTML = esc(full.slice(0, at)) +
+          `<span class="hl">${esc(full.slice(at, at + len))}</span>` +
+          esc(full.slice(at + len));
+      }
+    });
+  }
+
+  // 长按段落（手机）/ 双击（桌面）→ 划线、写笔记
+  function openNoteDialog(p) {
+    if (!R.book || !p || reader.hidden) return;
+    const text = String(p.textContent || '').trim();
+    if (!text) return;
+    const u = R.chapter && (R.chapter.url || R.chapters[R.index]?.u);
+    const existed = (state.marks || []).find((m) => m.type === 'note' && m.u === u &&
+      text.indexOf(String(m.text || '').slice(0, 18)) >= 0);
+
+    const mask = document.createElement('div');
+    mask.className = 'glass-mask';
+    mask.innerHTML = `<div class="note-dialog">
+      <div class="nd-head"><b>${existed ? '编辑笔记' : '划线 / 记笔记'}</b>
+        <span>${esc(R.chapters[R.index]?.t || '')}</span></div>
+      <div class="nd-quote">${esc(text.slice(0, 220))}</div>
+      <textarea class="nd-input" placeholder="写点什么（可留空，只划线）">${esc(existed ? existed.note : '')}</textarea>
+      <div class="gd-actions">
+        ${existed ? '<button class="g-text danger" data-del>删除</button>' : ''}
+        <button class="g-text" data-no>取消</button>
+        <button class="g-text ok" data-yes>保存</button>
+      </div></div>`;
+    document.body.appendChild(mask);
+    const close = () => mask.remove();
+    const area = mask.querySelector('.nd-input');
+    mask.addEventListener('click', (e) => { if (e.target === mask) close(); });
+    mask.querySelector('[data-no]').addEventListener('click', close);
+    mask.querySelector('[data-del]')?.addEventListener('click', async () => {
+      close();
+      try {
+        await removeMark(existed.id);
+        rEl.article.querySelectorAll('p.noted').forEach((el) => {
+          if (el.dataset.mark === existed.id) { el.classList.remove('noted'); delete el.dataset.mark; }
+        });
+        toast('已删除这条笔记');
+      } catch (err) { toast('删除失败：' + (err && err.message || err)); }
+    });
+    mask.querySelector('[data-yes]').addEventListener('click', async () => {
+      const note = area.value.trim();
+      close();
+      try {
+        await saveMark({
+          id: existed ? existed.id : '',
+          bookId: R.book.id, bookTitle: R.book.title || '',
+          i: R.index, t: R.chapters[R.index]?.t || '', u,
+          page: R.page, ratio: currentRatio(), type: 'note',
+          text: text.slice(0, 300), note,
+        });
+        applyHighlights();
+        toast(note ? '笔记已保存' : '已划线');
+      } catch (err) {
+        toast('保存失败：' + (err && err.message || err));
+      }
+    });
+  }
+
+  let pressTimer = null;
+  let pressEl = null;
+  const cancelPress = () => { clearTimeout(pressTimer); pressTimer = null; pressEl = null; };
+  rEl.article.addEventListener('touchstart', (e) => {
+    const p = e.target.closest('p');
+    if (!p || e.touches.length !== 1) return;
+    cancelPress();
+    pressEl = p;
+    pressTimer = setTimeout(() => {
+      const el = pressEl;
+      pressTimer = null;
+      pressEl = null;
+      if (el) {
+        swiped = true;          // 长按后浏览器还会补一次 click，别顺手翻页
+        openNoteDialog(el);
+      }
+    }, 550);
+  }, { passive: true });
+  ['touchend', 'touchmove', 'touchcancel'].forEach((ev) => {
+    rEl.article.addEventListener(ev, cancelPress, { passive: true });
+  });
+  rEl.article.addEventListener('dblclick', (e) => {
+    const p = e.target.closest('p');
+    if (p) openNoteDialog(p);
+  });
+  // 点已划线的段落 → 看笔记 / 删除
+  rEl.article.addEventListener('click', (e) => {
+    if (swiped) return;
+    const p = e.target.closest('p.noted');
+    if (!p) return;
+    e.stopPropagation();
+    const m = (state.marks || []).find((x) => x.id === p.dataset.mark);
+    if (!m) return;
+    e.preventDefault();
+    openPop(p, [{
+      label: m.note ? '删除这条笔记' : '删除这条划线', danger: true,
+      run: async () => {
+        try {
+          await removeMark(m.id);
+          p.classList.remove('noted');
+          delete p.dataset.mark;
+          toast('已删除');
+        } catch (err) { toast('删除失败'); }
+      },
+    }], m.note ? ('笔记：' + m.note) : '已划线');
+  });
 
   function updatePos() {
     const i = R.index, n = R.chapters.length;
@@ -1666,10 +1940,14 @@
   function saveProgress(immediate = false) {
     if (!R.book || !R.chapter) return;
     const doSave = async () => {
+      const sec = R.sec;
+      const chNew = R.chNew;
+      R.sec = 0;
+      R.chNew = false;
       const payload = {
         bookId: R.book.id, u: R.chapter.url || R.chapters[R.index]?.u,
         t: R.chapter.title || R.chapters[R.index]?.t, i: R.index,
-        n: R.chapters.length, ratio: currentRatio(),
+        n: R.chapters.length, ratio: currentRatio(), sec, chNew,
       };
       state.progress[R.book.id] = { ...payload, ts: Date.now() / 1000 };
       if (state.shelf[R.book.id]) {
@@ -1685,6 +1963,7 @@
 
   function closeReader() {
     saveProgress(true);
+    stopClock();
     reader.hidden = true;
     rEl.drawer.hidden = true;
     rEl.set.hidden = true;
@@ -1788,13 +2067,54 @@
     } catch (_) { /* 忽略 */ }
   }
 
+  function currentChapterU() {
+    return R.chapter ? (R.chapter.url || R.chapters[R.index]?.u || '') : '';
+  }
+
+  function updateMarkBtn() {
+    const t = $('#r-menu-mark-t');
+    if (!t || !R.book) return;
+    const on = !!markOfChapter(R.book.id, currentChapterU());
+    t.textContent = on ? '移出书签' : '加入书签';
+    $('#r-menu-mark').classList.toggle('on', on);
+  }
+
   $('#r-more').addEventListener('click', (e) => {
     e.stopPropagation();
     const menu = $('#r-menu');
     menu.hidden = !menu.hidden;
     if (!menu.hidden) {
-      dlPrev = 'none';
-      refreshDl();
+      const local = isLocalBook(R.book?.id);
+      $('#r-menu-dl').hidden = local;    // 本地书不用下载，也不用换源
+      $('#r-menu-src').hidden = local;
+      updateMarkBtn();
+      if (!local) {
+        dlPrev = 'none';
+        refreshDl();
+      }
+    }
+  });
+
+  $('#r-menu-mark').addEventListener('click', async () => {
+    if (!R.book) return;
+    const u = currentChapterU();
+    const cur = markOfChapter(R.book.id, u);
+    $('#r-menu').hidden = true;
+    try {
+      if (cur) {
+        await removeMark(cur.id);
+        toast('已移出书签');
+      } else {
+        await saveMark({
+          bookId: R.book.id, bookTitle: R.book.title || '', i: R.index,
+          t: R.chapters[R.index]?.t || '', u, page: R.page,
+          ratio: currentRatio(), type: 'bookmark', text: '', note: '',
+        });
+        toast('已加入书签');
+      }
+      updateMarkBtn();
+    } catch (err) {
+      toast('操作失败：' + (err && err.message || err));
     }
   });
 
@@ -1951,7 +2271,7 @@
     if (e.key === '/') { e.preventDefault(); go('#/search'); setTimeout(() => $('#sq')?.focus(), 80); }
   });
 
-  // ---------------------------------------------------------------- 视图：我的（书源健康 + 下载）
+  // ---------------------------------------------------------------- 书源健康面板（我的页底部）
   const HEALTH_SOURCES = [['sd', '速读谷'], ['qm', '七猫'], ['sq', '书旗'], ['qb', '全本网'],
     ['bc', '八叉'], ['bl', '八一'], ['dq', '得奇'], ['ali', '爱丽丝']];
   let healthTimer = null;
@@ -2006,6 +2326,161 @@
     $('#health-refresh')?.addEventListener('click', () => loadHealth(true));
   }
 
+  // ---------------------------------------------------------------- 视图：我的（统计 / 书签 / 本地书 / 备份 / 下载）
+  const fmtDur = (sec) => {
+    const s = Math.max(0, Math.round(sec || 0));
+    if (s < 60) return s ? s + ' 秒' : '0 分';
+    const m = Math.round(s / 60);
+    if (m < 60) return m + ' 分钟';
+    const h = Math.floor(m / 60);
+    return h + ' 小时' + (m % 60 ? ' ' + (m % 60) + ' 分' : '');
+  };
+  const shortDate = (d) => {
+    const p = String(d || '').split('-');
+    return p.length === 3 ? `${Number(p[1])}/${Number(p[2])}` : String(d || '');
+  };
+
+  function renderStats(s) {
+    const box = $('#mine-stats');
+    if (!box) return;
+    const recent = s.recent || [];
+    const max = Math.max(60, ...recent.map((x) => x.sec || 0));
+    const bars = recent.map((x) => {
+      const h = x.sec ? Math.max(6, Math.round((x.sec / max) * 100)) : 2;
+      return `<i class="${x.sec ? '' : 'zero'}" style="height:${h}%" title="${shortDate(x.d)} · ${fmtDur(x.sec)}${x.ch ? ' · ' + x.ch + ' 章' : ''}"></i>`;
+    }).join('');
+    const empty = !s.total.sec && !s.total.ch;
+    box.innerHTML = `<div class="stat-card">
+      <div class="sc-top"><b>阅读统计</b><span>${empty ? '随便读一章就有了' : '最近 14 天'}</span></div>
+      <div class="sc-nums">
+        <div><b>${s.today.sec ? fmtDur(s.today.sec) : '—'}</b><span>今日</span></div>
+        <div><b>${s.streak} 天</b><span>连续阅读</span></div>
+        <div><b>${fmtDur(s.total.sec)}</b><span>累计时长</span></div>
+        <div><b>${s.total.ch}</b><span>累计章数</span></div>
+      </div>
+      <div class="sc-bars">${bars}</div>
+    </div>`;
+  }
+
+  const markRow = (m) => `
+    <div class="mk-row" data-mark-go="${esc(m.bookId)}|${Number(m.i) || 0}">
+      <span class="mk-tag ${m.type === 'note' ? 'note' : ''}">${m.type === 'note' ? '笔记' : '书签'}</span>
+      <div class="mk-main">
+        <div class="mk-title">${esc(m.bookTitle || '未知书名')}</div>
+        <div class="mk-sub">${esc(m.t || '')}${m.page > 1 ? ` · 第 ${m.page} 页` : ''} · ${esc(relTime(m.ts))}</div>
+        ${m.note ? `<div class="mk-note">${esc(m.note)}</div>`
+          : (m.text ? `<div class="mk-note">${esc(m.text)}</div>` : '')}
+      </div>
+      <button class="mk-del" data-mark-del="${esc(m.id)}" title="删除">${ICONS.close}</button>
+    </div>`;
+
+  function bindMarks(root) {
+    root.querySelectorAll('[data-mark-go]').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('[data-mark-del]')) return;
+        const [bid, idx] = el.dataset.markGo.split('|');
+        go(`#/read/${encodeURIComponent(bid)}/${Number(idx) || 0}`);
+      });
+    });
+    root.querySelectorAll('[data-mark-del]').forEach((b) => {
+      b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        try {
+          await removeMark(b.dataset.markDel);
+          toast('已删除');
+          if (location.hash.startsWith('#/marks')) viewMarks(); else viewMine();
+        } catch (err) { toast('删除失败'); }
+      });
+    });
+  }
+
+  function renderMarks(box, limit) {
+    const list = (state.marks || []).slice().sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    if (!list.length) {
+      box.innerHTML = `<div class="mine-card glass-card">
+        <div class="mc-head"><b>书签与笔记</b></div>
+        <p class="mc-empty">阅读器右上「更多」可加书签，长按正文段落可以划线记笔记</p>
+      </div>`;
+      return;
+    }
+    box.innerHTML = `<div class="mine-card glass-card">
+      <div class="mc-head"><b>书签与笔记</b>
+        <a class="mc-more" href="#/marks">全部 ${list.length}</a></div>
+      ${list.slice(0, limit || list.length).map(markRow).join('')}
+    </div>`;
+    bindMarks(box);
+  }
+
+  function renderLocal(box, books) {
+    if (!books.length) {
+      box.innerHTML = `<div class="mine-card glass-card">
+        <div class="mc-head"><b>本地书</b><span class="mc-sub">TXT / EPUB</span></div>
+        <p class="mc-empty">点上面「导入本地书」，断网也能读</p>
+      </div>`;
+      return;
+    }
+    box.innerHTML = `<div class="mine-card glass-card">
+      <div class="mc-head"><b>本地书</b><span class="mc-sub">${books.length} 本 · 不联网</span></div>
+      ${books.map((b) => `<div class="mk-row">
+        <span class="mk-tag loc">本地</span>
+        <div class="mk-main">
+          <div class="mk-title">${esc(b.title)}</div>
+          <div class="mk-sub">${esc(b.author || '佚名')} · ${b.count} 章</div>
+        </div>
+        <button class="mk-go" data-local-go="${esc(b.id)}">阅读</button>
+        <button class="mk-del" data-local-del="${esc(b.id)}" title="删除">${ICONS.close}</button>
+      </div>`).join('')}
+    </div>`;
+    box.querySelectorAll('[data-local-go]').forEach((b) => {
+      b.addEventListener('click', () => go(`#/read/${encodeURIComponent(b.dataset.localGo)}`));
+    });
+    box.querySelectorAll('[data-local-del]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const id = b.dataset.localDel;
+        askConfirm('删除这本本地书？文件会被移除，阅读进度也不再保留。', '删除', async () => {
+          const r = await post('/api/local/delete', { bookId: id });
+          if (r.shelf) state.shelf = r.shelf;
+          if (r.marks) state.marks = r.marks;
+          toast('已删除');
+          viewMine();
+        });
+      });
+    });
+  }
+
+  function renderDownloads(box, downloads) {
+    const list = Object.values(downloads || {}).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    if (!list.length) {
+      box.innerHTML = `<div class="mine-card glass-card">
+        <div class="mc-head"><b>下载的书</b></div>
+        <p class="mc-empty">打开一本书，右上「更多」→「下载本书」可整本缓存</p>
+      </div>`;
+      return;
+    }
+    box.innerHTML = `<div class="mine-card glass-card">
+      <div class="mc-head"><b>下载的书</b><span class="mc-sub">${list.length} 本</span></div>
+      ${list.map((d) => `<div class="mk-row">
+        <span class="mk-tag dl">下载</span>
+        <div class="mk-main" data-dl-go="${esc(d.id)}">
+          <div class="mk-title">${esc(d.title)}</div>
+          <div class="mk-sub">${esc(d.author || '')}${d.failed ? ` · 已存 ${d.total - d.failed}/${d.total} 章` : ` · 已存 ${d.total} 章`}</div>
+        </div>
+        <button class="mk-go" data-dl-read="${esc(d.id)}">阅读</button>
+        <button class="mk-del" data-dl-del="${esc(d.id)}" title="删除下载记录">${ICONS.close}</button>
+      </div>`).join('')}
+    </div>`;
+    box.querySelectorAll('[data-dl-read]').forEach((b) => {
+      b.addEventListener('click', () => go(`#/read/${encodeURIComponent(b.dataset.dlRead)}`));
+    });
+    box.querySelectorAll('[data-dl-del]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        await post('/api/downloads', { bookId: b.dataset.dlDel });
+        toast('已删除下载记录');
+        viewMine();
+      });
+    });
+  }
+
   function viewMine() {
     setNav('mine');
     view.innerHTML = `
@@ -2013,59 +2488,69 @@
         <div class="page-head glass-head">
           <div>
             <h1 class="h1">我的</h1>
-            <div class="sub">离线下载与书源状态</div>
+            <div class="sub">阅读统计 · 本地书 · 备份</div>
           </div>
         </div>
-        <div id="mine-health"></div>
+        <div id="mine-stats"></div>
+        <div class="mine-actions glass-pill">
+          <button class="g-text" id="mine-import">导入本地书</button>
+          <i class="g-sep"></i>
+          <button class="g-text" id="mine-backup">备份</button>
+          <i class="g-sep"></i>
+          <button class="g-text" id="mine-restore">恢复</button>
+        </div>
+        <div id="mine-marks"></div>
+        <div id="mine-local"></div>
+        <div id="mine-downloads"></div>
         <div id="mine-lan"></div>
-        <div id="mine-body"><p style="color:var(--muted)">加载中…</p></div>
+        <div id="mine-health"></div>
       </div>`;
+    $('#mine-import').addEventListener('click', importLocalBook);
+    $('#mine-backup').addEventListener('click', exportBackup);
+    $('#mine-restore').addEventListener('click', restoreBackup);
+
+    api('/api/stats').then(renderStats).catch(() => {});
+    renderMarks($('#mine-marks'), 5);
     loadHealth(false);
-    Promise.all([api('/api/downloads'), api('/api/lan').catch(() => null)]).then(([{ downloads }, lan]) => {
-      // 手机/平板访问提示（局域网模式启动时有效）
+    Promise.all([
+      api('/api/local/list').catch(() => ({ books: [] })),
+      api('/api/downloads').catch(() => ({ downloads: {} })),
+      api('/api/lan').catch(() => null),
+    ]).then(([local, dl, lan]) => {
+      renderLocal($('#mine-local'), local.books || []);
+      renderDownloads($('#mine-downloads'), dl.downloads || {});
       const lanBox = $('#mine-lan');
       if (lan && lan.lan && lan.ips && lan.ips.length) {
         lanBox.innerHTML = `
           <div class="lan-card">
             <b>手机 / 平板阅读</b>
-            <p>同一 WiFi 下，用浏览器访问：<code>http://${esc(lan.ips[0])}:${lan.port}</code></p>
+            <p>同一 WiFi 下，用浏览器访问：<code>http://${esc(lan.ips[0])}:${esc(lan.port)}</code></p>
             <p class="s">在 iPhone Safari 打开后「分享 → 添加到主屏幕」，即可像 app 一样全屏使用</p>
           </div>`;
       }
-      const body = $('#mine-body');
-      const list = Object.values(downloads || {}).sort((a, b) => (b.ts || 0) - (a.ts || 0));
-      if (!list.length) {
-        body.innerHTML = `
-          <div class="empty"><div class="ic">⬇️</div>
-            <p>还没有下载的书<br>打开一本书，点右上角「更多」→「下载本书」</p>
-          </div>`;
-        return;
-      }
-      body.innerHTML = `<div class="grid">${list.map((d) => {
-        const ok = d.total - (d.failed || 0);
-        return `
-        <div class="card mine-card">
-          <a href="#/read/${esc(d.id)}">${coverBox(d)}</a>
-          <div class="t">${esc(d.title)}</div>
-          <div class="s">${esc(d.author || '')}</div>
-          <div class="m">${d.failed ? `已下载 ${ok}/${d.total} 章（${d.failed} 章失败）` : `已下载 ${d.total} 章`}${d.source ? ` · ${esc(d.source)}` : ''}</div>
-          <button class="del" data-dldel="${esc(d.id)}" title="删除下载记录">
-            <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
-          </button>
-        </div>`;
-      }).join('')}</div>`;
-      body.querySelectorAll('[data-dldel]').forEach((btn) => {
-        btn.addEventListener('click', async (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          await post('/api/downloads', { bookId: btn.dataset.dldel });
-          toast('已删除下载记录');
-          viewMine();
-        });
-      });
-    }).catch((e) => {
-      $('#mine-body').innerHTML = `<p style="color:var(--muted)">加载失败：${esc(e.message)}</p>`;
     });
+  }
+
+  // ---------------------------------------------------------------- 视图：全部书签与笔记
+  function viewMarks() {
+    setNav('mine');
+    const list = (state.marks || []).slice().sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    view.innerHTML = `<div class="page">
+      <div class="marks-head">
+        <a class="g-circle" href="#/mine" title="返回">${ICONS.back}</a>
+        <div class="mh-title">书签与笔记<span>${list.length}</span></div>
+        <span style="width:40px"></span>
+      </div>
+      <div id="marks-list"></div>
+    </div>`;
+    const box = $('#marks-list');
+    if (!list.length) {
+      box.innerHTML = `<div class="empty"><div class="ic">🔖</div>
+        <p>还没有书签<br>阅读器右上「更多」可加书签，长按正文可以划线记笔记</p></div>`;
+      return;
+    }
+    box.innerHTML = `<div class="mine-card glass-card">${list.map(markRow).join('')}</div>`;
+    bindMarks(box);
   }
 
   // ---------------------------------------------------------------- 路由分发
@@ -2087,6 +2572,7 @@
     if (page !== 'shelf' && shelfManage) exitShelfManage();
     if (page === 'shelf') viewShelf();
     else if (page === 'mine') viewMine();
+    else if (page === 'marks') viewMarks();
     else if (page === 'discover') viewDiscover(q);
     else if (page === 'list') viewList(q);
     else if (page === 'rank') viewRank(q);
