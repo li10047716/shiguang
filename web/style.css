@@ -921,7 +921,21 @@ body {
 .gp-item.on { color: var(--accent-2); font-weight: 600; background: var(--accent-soft); }
 .gp-item svg { width: 15px; height: 15px; flex: 0 0 auto; }
 .gp-sep { height: 1px; margin: 6px 10px; background: rgba(120, 145, 190, .24); }
+.gp-sep-label {
+  margin: 8px 12px 4px; font-size: 10.5px; font-weight: 600;
+  color: var(--muted); letter-spacing: 1px;
+}
 .gp-item.danger { color: #d3483a; }
+
+/* ---- 书源类型徽章（小说 / 漫画） ---- */
+.kind-tag {
+  display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 5px;
+  font-size: 10.5px; font-weight: 500; white-space: nowrap; vertical-align: 1px;
+}
+.kind-tag.kt-novel { background: rgba(64, 121, 191, .14); color: #3c6fa8; }
+.kind-tag.kt-comic { background: rgba(38, 150, 120, .14); color: #1f7a63; }
+html[data-theme="dark"] .kind-tag.kt-novel { background: rgba(110, 160, 220, .18); color: #8ab4e8; }
+html[data-theme="dark"] .kind-tag.kt-comic { background: rgba(70, 190, 155, .18); color: #6fd4b2; }
 
 /* ---- 书架横向列表（图 1） ---- */
 .shelf-list { display: flex; flex-direction: column; gap: 12px; }

@@ -58,19 +58,20 @@
 
   // 书源显示名与徽章颜色。速读谷作为默认源，列表里不额外标注
   const SRC_META = {
-    '速读谷': ['sd', '速读谷'],
-    '七猫': ['qm', '七猫'],
-    '书旗': ['sq', '书旗'],
-    '全本小说网': ['qb', '全本网'],
-    '八叉书库': ['bc', '八叉'],
-    '八一中文网': ['bl', '八一'],
-    '得奇小说网': ['dq', '得奇'],
-    '爱丽丝书屋': ['ali', '爱丽丝'],
-    '包子漫画': ['gs', '包子'],
-    '快看漫画': ['kk', '快看'],
-    '大人漫画': ['dr', '大人'],
-    '漫蛙漫画': ['mw', '漫蛙'],
-    '本地导入': ['loc', '本地'],
+    // [code, 短名, 类型]：类型用于打「小说 / 漫画」标签（loc 本地书不标）
+    '速读谷': ['sd', '速读谷', 'novel'],
+    '七猫': ['qm', '七猫', 'novel'],
+    '书旗': ['sq', '书旗', 'novel'],
+    '全本小说网': ['qb', '全本网', 'novel'],
+    '八叉书库': ['bc', '八叉', 'novel'],
+    '八一中文网': ['bl', '八一', 'novel'],
+    '得奇小说网': ['dq', '得奇', 'novel'],
+    '爱丽丝书屋': ['ali', '爱丽丝', 'novel'],
+    '包子漫画': ['gs', '包子', 'comic'],
+    '快看漫画': ['kk', '快看', 'comic'],
+    '大人漫画': ['dr', '大人', 'comic'],
+    '漫蛙漫画': ['mw', '漫蛙', 'comic'],
+    '本地导入': ['loc', '本地', ''],
   };
   const isLocalBook = (id) => String(id || '').startsWith('loc:');
   const srcBadge = (source, always = false) => {
@@ -78,6 +79,16 @@
     if (!meta) return '';
     if (!always && meta[0] === 'sd') return '';
     return `<span class="src-dot ${meta[0]}">${esc(meta[1])}</span>`;
+  };
+  // 书源类型徽章：小说 / 漫画（搜索结果、书源列表里区分用）
+  const KIND_NAMES = { novel: '小说', comic: '漫画' };
+  const srcTypeByCode = (code) => {
+    const e = Object.values(SRC_META).find((v) => v[0] === code);
+    return (e && e[2]) || '';
+  };
+  const kindBadge = (source) => {
+    const t = SRC_META[source] ? SRC_META[source][2] : srcTypeByCode(source);
+    return t && KIND_NAMES[t] ? `<span class="kind-tag kt-${t}">${KIND_NAMES[t]}</span>` : '';
   };
 
   // ---------------------------------------------------------------- 液态玻璃组件
@@ -108,7 +119,7 @@
     el.className = 'glass-pop';
     el.innerHTML = (title ? `<div class="gp-title">${esc(title)}</div>` : '') +
       items.map((it, i) => it.sep
-        ? '<div class="gp-sep"></div>'
+        ? (it.label ? `<div class="gp-sep-label">${esc(it.label)}</div>` : '<div class="gp-sep"></div>')
         : `<button class="gp-item ${it.on ? 'on' : ''} ${it.danger ? 'danger' : ''}" data-i="${i}">
         <span>${esc(it.label)}</span>${it.on ? ICONS.check : ''}</button>`).join('');
     document.body.appendChild(el);
@@ -1654,9 +1665,10 @@
   }
 
   // ---------------------------------------------------------------- 视图：搜索
-  const SEARCH_SOURCES = [['all', '全部书源'], ['sd', '速读谷'], ['qm', '七猫'], ['sq', '书旗'],
-    ['qb', '全本网'], ['bc', '八叉'], ['bl', '八一'], ['dq', '得奇'], ['ali', '爱丽丝'],
-    ['gs', '包子漫画'], ['kk', '快看漫画'], ['dr', '大人漫画'], ['mw', '漫蛙漫画']];
+  // [code, 名称, 类型]：类型用于选择弹窗按「小说 / 漫画」分组
+  const SEARCH_SOURCES = [['all', '全部书源', ''], ['sd', '速读谷', 'novel'], ['qm', '七猫', 'novel'], ['sq', '书旗', 'novel'],
+    ['qb', '全本网', 'novel'], ['bc', '八叉', 'novel'], ['bl', '八一', 'novel'], ['dq', '得奇', 'novel'], ['ali', '爱丽丝', 'novel'],
+    ['gs', '包子漫画', 'comic'], ['kk', '快看漫画', 'comic'], ['dr', '大人漫画', 'comic'], ['mw', '漫蛙漫画', 'comic']];
   const HIST_KEY = 'sg.search.history';
   const SEARCH_SRC_KEY = 'sg.search.src';
   const PREF_SRC_KEY = 'sg.pref.src';           // 上次在折叠组里选过的书源
@@ -1760,17 +1772,22 @@
     $('#s-dots').addEventListener('click', (e) => {
       e.stopPropagation();
       const off = new Set(state.settings.disabledSources || []);
+      const pick = (k, n) => ({
+        label: (k !== 'all' && off.has(k)) ? `${n}（已关闭）` : n,
+        on: k === $('#ssrc').value,
+        run: () => {
+          $('#ssrc').value = k;
+          try { localStorage.setItem(SEARCH_SRC_KEY, k); } catch (_) { /* 忽略 */ }
+          const v = $('#sq').value.trim();
+          go(v ? `#/search?src=${k}&q=${encodeURIComponent(v)}` : `#/search?src=${k}`);
+        },
+      });
       togglePop(e.currentTarget, 'search-src', [
-        ...SEARCH_SOURCES.map(([k, n]) => ({
-          label: (k !== 'all' && off.has(k)) ? `${n}（已关闭）` : n,
-          on: k === $('#ssrc').value,
-          run: () => {
-            $('#ssrc').value = k;
-            try { localStorage.setItem(SEARCH_SRC_KEY, k); } catch (_) { /* 忽略 */ }
-            const v = $('#sq').value.trim();
-            go(v ? `#/search?src=${k}&q=${encodeURIComponent(v)}` : `#/search?src=${k}`);
-          },
-        })),
+        pick('all', '全部书源'),
+        { sep: true, label: '小说' },
+        ...SEARCH_SOURCES.filter(([, , t]) => t === 'novel').map(([k, n]) => pick(k, n)),
+        { sep: true, label: '漫画' },
+        ...SEARCH_SOURCES.filter(([, , t]) => t === 'comic').map(([k, n]) => pick(k, n)),
         { sep: true },
         { label: '书源健康与开关', run: () => go('#/mine') },
       ], '选择书源');
@@ -1837,7 +1854,7 @@
               <a class="item-main" href="#/book/${encodeURIComponent(b.id)}">
                 ${coverBox(b)}
                 <div class="body">
-                  <h4>${esc(b.title)}${srcBadge(b.source, true)}</h4>
+                  <h4>${esc(b.title)}${kindBadge(b.source)}${srcBadge(b.source, true)}</h4>
                   <div class="meta">
                     ${b.author ? `<span>${esc(b.author)}</span>` : ''}
                     ${b.category ? `<span>${esc(b.category)}</span>` : ''}
@@ -1855,7 +1872,7 @@
             ${multi ? `<div class="src-list" id="sg-${gi}" hidden>${g.list.map(({ b: x }) => `
               <a class="src-opt ${x.id === b.id ? 'on' : ''}" href="#/book/${encodeURIComponent(x.id)}"
                  data-src="${esc(x.source || '')}">
-                ${srcBadge(x.source, true)}
+                ${kindBadge(x.source)}${srcBadge(x.source, true)}
                 <span class="so-title">${esc(x.title)}</span>
                 <span class="so-meta">${esc(x.author || x.category || '')}</span>
                 ${x.id === b.id ? ICONS.check : ''}
@@ -2008,6 +2025,7 @@
     sec: 0, chNew: false, clock: null, // 阅读计时（秒）/ 是否刚换章
     // 漫画：一话是一组图片，cpage 是当前页。autoScroll 由首图比例判断（条漫还是页漫）
     kind: 'novel', cimgs: [], cpage: 0, autoScroll: false,
+    backHash: '#/shelf', // 从哪进来的就回哪：书架进→书架，详情页进→详情页
   };
 
   const rEl = {
@@ -2792,7 +2810,7 @@
   $('#r-end-next')?.addEventListener('click', () => loadChapter(R.index + 1));
   $('#r-back').addEventListener('click', () => {
     closeReader();
-    go('#/shelf');
+    go(R.backHash || '#/shelf');
   });
   $('#r-toc-btn').addEventListener('click', () => toggleToc());
   $('#toc-close').addEventListener('click', () => toggleToc(false));
@@ -3085,9 +3103,8 @@
         if (!rEl.set.hidden) { rEl.set.hidden = true; return; }
         if (!rEl.drawer.hidden) { toggleToc(false); return; }
         if (reader.classList.contains('ui-hidden')) { toggleUI(false); return; }
-        const id = R.book?.id;
         closeReader();
-        go(id ? `#/book/${id}` : '#/shelf');
+        go(R.backHash || '#/shelf');
         return;
       }
       if (e.key === 'ArrowLeft') { e.preventDefault(); prevPage(); }
@@ -3130,7 +3147,7 @@
       const detail = r ? `${r.ms}ms · ${r.msg}` : '等待检测';
       return `<div class="health-row">
         <span class="h-dot ${cls}"></span>
-        <div class="h-name"><b>${esc(name)}</b><span>${esc(detail)}</span></div>
+        <div class="h-name"><b>${esc(name)}</b>${kindBadge(code)}<span>${esc(detail)}</span></div>
         <span class="h-state ${cls}">${txt}</span>
         <button class="h-switch ${off.has(code) ? '' : 'on'}" data-code="${code}"
           title="启用 / 停用该书源" aria-label="启用或停用该书源"><i></i></button>
@@ -3512,6 +3529,7 @@
   }
 
   // ---------------------------------------------------------------- 路由分发
+  let LAST_PAGE_HASH = '#/shelf'; // 最近一次非阅读页的 hash，阅读器返回时用
   async function render() {
     const { parts, q } = parseHash();
     const page = parts[0] || 'shelf';
@@ -3519,9 +3537,12 @@
       const id = parts[1];
       const idx = parts[2] != null ? Number(parts[2]) : null;
       if (!reader.hidden && R.book && R.book.id === id && idx == null) return;
+      // 全新打开一本书时记录来源页；阅读中换章 / 翻页不覆盖
+      if (reader.hidden || !R.book || R.book.id !== id) R.backHash = LAST_PAGE_HASH;
       await openReader(id, idx);
       return;
     }
+    LAST_PAGE_HASH = location.hash || '#/shelf';
     if (!reader.hidden) closeReader();
     document.body.style.overflow = ''; // 阅读器使用独立滚动容器
     // 搜索页像图 2 一样是沉浸式整页，收起底部标签栏
