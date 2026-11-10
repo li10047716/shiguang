@@ -1430,6 +1430,28 @@ class Handler(BaseHTTPRequestHandler):
             elif op == "touch" and bid:
                 if bid in st["shelf"]:
                     st["shelf"][bid]["lastRead"] = time.time()
+            elif op == "meta" and bid:
+                # 分组 / 标签：允许显式清空（group="" 或 tags=[]），
+                # 不能用 add 那两个空值过滤，否则「取消分组」会失效
+                cur = st["shelf"].get(bid)
+                if cur is not None:
+                    if "group" in book:
+                        g = str(book.get("group") or "")
+                        if g in ("reading", "todo", "done"):
+                            cur["group"] = g
+                        else:
+                            cur.pop("group", None)
+                    if "tags" in book:
+                        raw = book.get("tags") or []
+                        tags = []
+                        for t in raw:  # noqa: PLR1702 - 保持顺序去重，最多 8 个
+                            t = str(t).strip()[:12]
+                            if t and t not in tags:
+                                tags.append(t)
+                        if tags:
+                            cur["tags"] = tags[:8]
+                        else:
+                            cur.pop("tags", None)
             save_state(st)
         return self._json({"ok": True, "shelf": st["shelf"]})
 

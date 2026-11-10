@@ -151,6 +151,36 @@
     });
   }
 
+  // 玻璃质感输入框：给书打标签用，WKWebView 里原生 prompt 不可靠
+  function askInput(title, placeholder, onOk, opts = {}) {
+    const mask = document.createElement('div');
+    mask.className = 'glass-mask';
+    mask.innerHTML = `<div class="glass-dialog input-dialog">
+      <div class="gd-msg">${esc(title)}</div>
+      <input class="nd-input" maxlength="24" autocomplete="off"
+        placeholder="${esc(placeholder || '')}" value="${esc(opts.value || '')}">
+      <div class="gd-actions">
+        <button class="g-text" data-no>取消</button>
+        <button class="g-text ok" data-yes>${esc(opts.okLabel || '确定')}</button>
+      </div></div>`;
+    document.body.appendChild(mask);
+    const input = mask.querySelector('.nd-input');
+    const close = () => mask.remove();
+    const done = () => {
+      const v = input.value.trim();
+      close();
+      if (v) Promise.resolve(onOk(v)).catch((err) => toast('操作失败：' + (err && err.message || err)));
+    };
+    mask.addEventListener('click', (e) => { if (e.target === mask) close(); });
+    mask.querySelector('[data-no]').addEventListener('click', close);
+    mask.querySelector('[data-yes]').addEventListener('click', done);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); done(); }
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+    });
+    setTimeout(() => input.focus(), 60);
+  }
+
   // 章节标题常自带「第十九章」，别和「第19章」重复显示
   function chapterLabel(t) {
     return String(t || '').replace(/^第[一二三四五六七八九十百千零〇0-9]+章[\s:：·]*/, '').trim() || String(t || '');
@@ -441,6 +471,38 @@
   const saveSettings = () => post('/api/settings', { settings: state.settings }).catch(() => {});
   const isOnShelf = (id) => !!state.shelf[id];
 
+  // ---------------------------------------------------------------- 外观：浅色 / 深色 / 跟随系统
+  // 解析结果写到 <html data-theme>，index.html 头部还有一段极小的内联脚本先读 localStorage，
+  // 这样冷启动不会先闪一下白底。
+  const THEME_KEY = 'sg.theme';
+  const mediaDark = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  const themePref = () => state.settings.appTheme || 'auto';
+  function resolveTheme() {
+    const t = themePref();
+    if (t === 'light' || t === 'dark') return t;
+    return mediaDark && mediaDark.matches ? 'dark' : 'light';
+  }
+  function applyTheme() {
+    const t = resolveTheme();
+    document.documentElement.dataset.theme = t;
+    try { localStorage.setItem(THEME_KEY, t); } catch (_) { /* 隐私模式忽略 */ }
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', t === 'dark' ? '#0d1219' : '#eef2f9');
+    document.querySelectorAll('[data-theme-opt]').forEach((b) => {
+      b.classList.toggle('on', (b.dataset.themeOpt || 'auto') === themePref());
+    });
+  }
+  function setAppTheme(v) {
+    state.settings.appTheme = v;
+    saveSettings();
+    applyTheme();
+  }
+  if (mediaDark) {
+    const onSysChange = () => { if (themePref() === 'auto') applyTheme(); };
+    if (mediaDark.addEventListener) mediaDark.addEventListener('change', onSysChange);
+    else if (mediaDark.addListener) mediaDark.addListener(onSysChange);
+  }
+
   async function addShelf(book) {
     const payload = {
       id: book.id, title: book.title, cover: book.cover,
@@ -483,16 +545,55 @@
       <div class="s">${esc(b.author || b.category || '')}</div>
     </a>`;
 
+  // ---- 书架分组 / 标签：显式 group 优先，没有就按阅读进度推断 ----
+  const GROUPS = [['reading', '在读'], ['todo', '想读'], ['done', '已读完']];
+  const groupName = (k) => (GROUPS.find(([x]) => x === k) || ['reading', '在读'])[1];
+  function bookGroup(b) {
+    const g = b && b.group;
+    if (g && GROUPS.some(([k]) => k === g)) return g;
+    const p = (b && b.progress) || {};
+    const i = Number(p.i);
+    if (Number.isFinite(i) && i > 0) {
+      if (b.count && i >= b.count - 1) return 'done';
+      return 'reading';
+    }
+    return 'todo';
+  }
+  const bookTags = (b) => (b && Array.isArray(b.tags) ? b.tags.filter(Boolean) : []);
+
+  function matchScope(b, scope) {
+    if (!scope || scope === 'all') return true;
+    if (scope.indexOf('g:') === 0) return bookGroup(b) === scope.slice(2);
+    if (scope.indexOf('t:') === 0) return bookTags(b).indexOf(scope.slice(2)) >= 0;
+    return (b.source || srcNameById(b.id)) === scope;
+  }
+  function scopeLabel(scope) {
+    if (!scope || scope === 'all') return '全部';
+    if (scope.indexOf('g:') === 0) return groupName(scope.slice(2));
+    if (scope.indexOf('t:') === 0) return '#' + scope.slice(2);
+    return scope;
+  }
+  // 书架内搜索：书名 / 作者 / 标签 / 来源，忽略大小写与标点
+  function matchShelfQuery(b, kw) {
+    const k = normKey(kw);
+    if (!k) return true;
+    return normKey(b.title).indexOf(k) >= 0 || normKey(b.author).indexOf(k) >= 0
+      || normKey(b.source || srcNameById(b.id)).indexOf(k) >= 0
+      || bookTags(b).some((t) => normKey(t).indexOf(k) >= 0);
+  }
+
   const shelfCard = (b, mg = false, sel = false) => {
     const p = b.progress || {};
     const pct = Math.max(0, Math.min(100, Math.round((p.ratio || 0) * 100)));
-    const extra = `${p.i ? `<div class="prog"><i style="width:${pct}%"></i></div>` : ''}`;
+    const g = bookGroup(b);
+    const extra = `<span class="cv-tag g-${g}">${groupName(g)}</span>` +
+      `${p.i ? `<div class="prog"><i style="width:${pct}%"></i></div>` : ''}`;
     const sub = p.t ? `读到 ${esc(p.t)}` : '尚未开始';
     const meta = `${b.count ? `${b.count} 章 · ` : ''}${esc(b.source || '')}书源`;
     const tag = mg ? 'div' : 'a';
     const attrs = mg ? `data-pick="${esc(b.id)}"` : `href="#/read/${b.id}"`;
     return `
-      <${tag} class="card ${mg ? 'manage' : ''} ${sel ? 'picked' : ''}" ${attrs}>
+      <${tag} class="card ${mg ? 'manage' : ''} ${sel ? 'picked' : ''}" ${attrs} data-sid="${esc(b.id)}">
         ${coverBox(b, extra)}
         <div class="t">${esc(b.title)}</div>
         <div class="s">${sub}</div>
@@ -514,10 +615,12 @@
       ? `<span class="unread ${unread >= 20 ? 'hot' : ''}">${unread > 99 ? '99+' : unread}</span>` : '';
     const src = b.source || srcNameById(b.id) || '速读谷';
     const ago = relTime(b.lastRead);
-    const extra = '<span class="cv-tag">小说</span>';
+    const g = bookGroup(b);
+    const tags = bookTags(b);
+    const extra = `<span class="cv-tag g-${g}">${groupName(g)}</span>`;
     const tag = mg ? 'div' : 'a';
     const attrs = mg ? `data-pick="${esc(b.id)}"` : `href="#/read/${b.id}"`;
-    return `<${tag} class="sl-card ${mg ? 'manage' : ''} ${sel ? 'picked' : ''}" ${attrs}>
+    return `<${tag} class="sl-card ${mg ? 'manage' : ''} ${sel ? 'picked' : ''}" ${attrs} data-sid="${esc(b.id)}">
       ${coverBox(b, extra)}
       <div class="sl-body">
         <div class="sl-title">${esc(b.title)}</div>
@@ -525,6 +628,7 @@
         <div class="sl-line">${p.t ? `已读：第${readI}章 ${esc(chapterLabel(p.t))}` : '尚未开始阅读'}</div>
         <div class="sl-line">来源：${esc(src)}</div>
         <div class="sl-line sl-last">${ago ? esc(ago) + ' · ' : ''}${p.t ? `第${readI}章 ${esc(chapterLabel(p.t))}` : '暂无更新'}</div>
+        ${tags.length ? `<div class="sl-tags">${tags.slice(0, 4).map((t) => `<span class="sl-tag">#${esc(t)}</span>`).join('')}</div>` : ''}
         <div class="cache-line" data-cache="${esc(b.id)}"></div>
       </div>
       ${badge}
@@ -594,27 +698,70 @@
   }
 
   // ---------------------------------------------------------------- 视图：书架
+  // 书架内搜索：临时筛选，不落盘；只在改搜索词时原地显示/隐藏卡片，避免输入框丢焦点
+  let shelfSearch = '';
+  let shelfSearchOn = false;
+  let focusShelfSearch = false;
+
+  function applyShelfQuery() {
+    let n = 0;
+    view.querySelectorAll('[data-sid]').forEach((el) => {
+      const b = state.shelf[el.dataset.sid];
+      const ok = !b || matchShelfQuery(b, shelfSearch);
+      el.hidden = !ok;
+      if (ok) n += 1;
+    });
+    const sub = $('#shelf-sub');
+    if (sub) sub.textContent = shelfSearch ? `在书架里找到 ${n} 本` : (sub.dataset.base || '');
+    const none = $('#shelf-none');
+    if (none) none.hidden = n > 0;
+  }
+
+  // 批量改分组 / 标签：一次一本书交给后端 meta 接口，返回最新书架
+  async function setShelfMeta(ids, patch) {
+    let shelf = state.shelf;
+    for (const id of ids) {
+      const r = await post('/api/shelf', { op: 'meta', book: Object.assign({ id }, patch) });
+      if (r && r.shelf) shelf = r.shelf;
+    }
+    state.shelf = shelf;
+  }
+
+  function closeShelfSearch() {
+    shelfSearch = '';
+    shelfSearchOn = false;
+    viewShelf();
+  }
+
   function viewShelf() {
     setNav('shelf');
     const mobile = window.matchMedia('(max-width: 640px)').matches;
     const layout = shelfPref('shelfLayout', mobile ? 'list' : 'grid');
     const sort = shelfPref('shelfSort', 'recent');
-    const filter = shelfPref('shelfFilter', 'all');
     const all = Object.values(state.shelf);
     if (shelfManage && !all.length) exitShelfManage();
-    let books = filter === 'all' ? all.slice()
-      : all.filter((b) => (b.source || srcNameById(b.id)) === filter);
+    // 旧版本存的是书源名：源被停用/改名后回落到「全部」，别让书架看着是空的
+    const saved = shelfPref('shelfFilter', 'all');
+    const scope = (saved === 'all' || String(saved).indexOf('g:') === 0 || String(saved).indexOf('t:') === 0
+      || all.some((b) => (b.source || srcNameById(b.id)) === saved)) ? saved : 'all';
+    let books = all.filter((b) => matchScope(b, scope));
     books.sort((a, b) => {
       if (sort === 'title') return String(a.title || '').localeCompare(String(b.title || ''), 'zh');
       if (sort === 'added') return (b.added || 0) - (a.added || 0);
       return (b.lastRead || 0) - (a.lastRead || 0);
     });
     const sources = [...new Set(all.map((b) => b.source || srcNameById(b.id)).filter(Boolean))];
+    const tags = [...new Set(all.flatMap(bookTags))].sort((a, b) => a.localeCompare(b, 'zh'));
+    const countGroup = (g) => all.filter((b) => bookGroup(b) === g).length;
     const body = books.length
       ? layout === 'list'
         ? `<div class="shelf-list">${books.map((b) => shelfListCard(b, shelfManage, shelfPicked.has(b.id))).join('')}</div>`
         : `<div class="grid">${books.map((b) => shelfCard(b, shelfManage, shelfPicked.has(b.id))).join('')}</div>`
-      : `<div class="empty"><div class="ic">📚</div>
+      : all.length
+        ? `<div class="empty"><div class="ic">🗂</div>
+             <p>「${esc(scopeLabel(scope))}」下还没有书</p>
+             <button class="btn ghost" id="scope-reset">看全部</button></div>`
+        : `<div class="empty"><div class="ic">📚</div>
            <p>书架还是空的<br>去「发现」找一本喜欢的书吧</p>
            <a class="btn" href="#/discover">去逛逛</a></div>`;
 
@@ -625,47 +772,79 @@
       <span class="mb-count">已选 <b>${pickedN}</b> 本</span>
       <div class="mb-actions">
         <button class="g-text sm" id="mg-all">${books.length && pickedN === books.length ? '取消全选' : '全选'}</button>
+        <button class="g-text sm" id="mg-group" data-pop ${pickedN ? '' : 'disabled'}>归类</button>
         <button class="g-text sm danger" id="mg-del" ${pickedN ? '' : 'disabled'}>删除</button>
         <button class="g-text sm" id="mg-done">完成</button>
       </div></div>` : '';
+
+    const baseSub = books.length ? `共 ${books.length} 本 · 阅读进度自动保存`
+      : all.length ? `共 ${all.length} 本 · 这一组还没有书` : '收藏的书会出现在这里';
 
     view.innerHTML = `
       <div class="page">
         <div class="page-head glass-head">
           <div>
             <h1 class="h1">书架</h1>
-            <div class="sub">${books.length ? `共 ${books.length} 本 · 阅读进度自动保存` : '收藏的书会出现在这里'}</div>
+            <div class="sub" id="shelf-sub" data-base="${esc(baseSub)}">${esc(baseSub)}</div>
           </div>
           <div class="glass-pill shelf-tools">
-            <button class="g-text" id="shelf-filter" data-pop title="按书源筛选"><span>${filter === 'all' ? '全部' : esc(filter)}</span>${ICONS.chev}</button>
+            <button class="g-text" id="shelf-filter" data-pop title="筛选与分组"><span>${esc(scopeLabel(scope))}</span>${ICONS.chev}</button>
             <i class="g-sep"></i>
             <button class="g-ico" id="shelf-layout" title="${layout === 'list' ? '切换为网格' : '切换为列表'}">${layout === 'list' ? ICONS.grid : ICONS.list}</button>
-            <a class="g-ico" href="#/search" title="搜索" aria-label="搜索">${ICONS.search}</a>
+            <a class="g-ico" href="#/search" title="搜索书源" aria-label="搜索书源">${ICONS.search}</a>
             <button class="g-ico" id="shelf-more" data-pop title="书架选项">${ICONS.dots}</button>
           </div>
         </div>
+        ${shelfSearchOn ? `<div class="glass-search shelf-search">
+          ${ICONS.search}
+          <input id="sh-q" placeholder="搜索书架：书名 / 作者 / 标签" value="${esc(shelfSearch)}"
+            autocomplete="off" enterkeyhint="search">
+          <button class="s-clear" id="sh-close" title="关闭">${ICONS.close}</button>
+        </div>` : ''}
         ${manageBar}
+        <div id="shelf-none" class="empty" hidden><div class="ic">🔍</div><p>没有匹配的书</p></div>
         ${body}
       </div>`;
 
     $('#shelf-layout').addEventListener('click', () => {
       setShelfPref('shelfLayout', layout === 'list' ? 'grid' : 'list');
     });
+    $('#scope-reset')?.addEventListener('click', () => setShelfPref('shelfFilter', 'all'));
+
+    // 筛选菜单：分组 → 标签 → 书源，一个菜单装下三种范围
     $('#shelf-filter').addEventListener('click', (e) => {
       e.stopPropagation();
-      const clearPick = () => { shelfPicked.clear(); };
-      togglePop(e.currentTarget, 'shelf-filter', [
-        { label: '全部', on: filter === 'all', run: () => { clearPick(); setShelfPref('shelfFilter', 'all'); } },
-        ...sources.map((s) => ({ label: s, on: filter === s,
-          run: () => { clearPick(); setShelfPref('shelfFilter', s); } })),
-      ], '按书源筛选');
+      const pick = (v) => { shelfPicked.clear(); setShelfPref('shelfFilter', v); };
+      const items = [
+        { label: `全部（${all.length}）`, on: scope === 'all', run: () => pick('all') },
+        { sep: true },
+        ...GROUPS.map(([k, n]) => ({ label: `${n}（${countGroup(k)}）`, on: scope === 'g:' + k,
+          run: () => pick('g:' + k) })),
+      ];
+      if (tags.length) {
+        items.push({ sep: true },
+          ...tags.map((t) => ({ label: '#' + t, on: scope === 't:' + t, run: () => pick('t:' + t) })));
+      }
+      if (sources.length > 1) {
+        items.push({ sep: true },
+          ...sources.map((s) => ({ label: s, on: scope === s, run: () => pick(s) })));
+      }
+      togglePop(e.currentTarget, 'shelf-filter', items, '筛选 / 分组 / 标签');
     });
+
     $('#shelf-more').addEventListener('click', (e) => {
       e.stopPropagation();
       togglePop(e.currentTarget, 'shelf-more', [
         { label: '最近阅读', on: sort === 'recent', run: () => setShelfPref('shelfSort', 'recent') },
         { label: '按书名', on: sort === 'title', run: () => setShelfPref('shelfSort', 'title') },
         { label: '加入时间', on: sort === 'added', run: () => setShelfPref('shelfSort', 'added') },
+        { sep: true },
+        { label: shelfSearchOn ? '退出书架搜索' : '搜索书架', run: () => {
+          if (shelfSearchOn) { closeShelfSearch(); return; }
+          shelfSearchOn = true;
+          focusShelfSearch = true;
+          viewShelf();
+        } },
         { label: '后台预取章节', on: state.settings.autoPrefetch !== false, run: () => {
           state.settings.autoPrefetch = state.settings.autoPrefetch === false;
           saveSettings();
@@ -680,6 +859,21 @@
       ], '书架选项');
     });
 
+    // 搜索框：输入时原地过滤，不重渲染（否则手机上键盘会收起来）
+    const q = $('#sh-q');
+    if (q) {
+      q.addEventListener('input', () => { shelfSearch = q.value; applyShelfQuery(); });
+      q.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeShelfSearch(); }
+      });
+      $('#sh-close').addEventListener('click', closeShelfSearch);
+      if (focusShelfSearch) {
+        focusShelfSearch = false;
+        setTimeout(() => { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 60);
+      }
+    }
+    if (shelfSearch) applyShelfQuery();
+
     if (shelfManage) {
       view.querySelectorAll('[data-pick]').forEach((el) => {
         el.addEventListener('click', () => {
@@ -689,9 +883,27 @@
         });
       });
       $('#mg-all').addEventListener('click', () => {
-        if (books.length && pickedN === books.length) shelfPicked.clear();
-        else books.forEach((b) => shelfPicked.add(b.id));
+        const visible = books.filter((b) => matchShelfQuery(b, shelfSearch));
+        if (visible.length && visible.every((b) => shelfPicked.has(b.id))) shelfPicked.clear();
+        else visible.forEach((b) => shelfPicked.add(b.id));
         viewShelf();
+      });
+      $('#mg-group').addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!pickedN) return;
+        const hasTags = pickedIds.some((id) => bookTags(state.shelf[id]).length);
+        const items = [
+          ...GROUPS.map(([k, n]) => ({ label: `归到「${n}」`,
+            on: pickedIds.every((id) => bookGroup(state.shelf[id]) === k),
+            run: () => bulkShelfMeta(pickedIds, { group: k }, `已归到「${n}」`) })),
+          { sep: true },
+          { label: '添加标签…', run: () => addTagsTo(pickedIds) },
+        ];
+        if (hasTags) {
+          items.push({ label: '清除标签', danger: true,
+            run: () => bulkShelfMeta(pickedIds, { tags: [] }, '标签已清除') });
+        }
+        togglePop(e.currentTarget, 'mg-group', items, `归类 ${pickedN} 本`);
       });
       $('#mg-del').addEventListener('click', () => {
         if (!pickedN) return;
@@ -728,6 +940,32 @@
         if (missing.every((b) => state.shelf[b.id]?.count)) render();
       })();
     }
+  }
+
+  async function bulkShelfMeta(ids, patch, msg) {
+    busy(true);
+    try {
+      await setShelfMeta(ids, patch);
+      if (msg) toast(msg);
+      viewShelf();
+    } catch (e) {
+      toast('操作失败：' + (e && e.message || e));
+    } finally {
+      busy(false);
+    }
+  }
+
+  function addTagsTo(ids) {
+    askInput(`给 ${ids.length} 本书加标签`, '空格或逗号分隔，如：仙侠 爽文', async (v) => {
+      const add = String(v).split(/[\s,，、;；]+/).map((s) => s.trim().slice(0, 12)).filter(Boolean);
+      if (!add.length) return;
+      for (const id of ids) {
+        const tags = [...new Set([...bookTags(state.shelf[id]), ...add])].slice(0, 8);
+        await setShelfMeta([id], { tags });
+      }
+      toast('标签已添加');
+      viewShelf();
+    });
   }
 
   // ---------------------------------------------------------------- 视图：发现
@@ -2499,6 +2737,13 @@
           <i class="g-sep"></i>
           <button class="g-text" id="mine-restore">恢复</button>
         </div>
+        <div class="mine-actions glass-pill theme-pill" id="mine-theme">
+          <button class="g-text" data-theme-opt="auto">跟随系统</button>
+          <i class="g-sep"></i>
+          <button class="g-text" data-theme-opt="light">浅色</button>
+          <i class="g-sep"></i>
+          <button class="g-text" data-theme-opt="dark">深色</button>
+        </div>
         <div id="mine-marks"></div>
         <div id="mine-local"></div>
         <div id="mine-downloads"></div>
@@ -2508,6 +2753,10 @@
     $('#mine-import').addEventListener('click', importLocalBook);
     $('#mine-backup').addEventListener('click', exportBackup);
     $('#mine-restore').addEventListener('click', restoreBackup);
+    $('#mine-theme').querySelectorAll('[data-theme-opt]').forEach((b) => {
+      b.addEventListener('click', () => setAppTheme(b.dataset.themeOpt || 'auto'));
+    });
+    applyTheme();   // 页面重建后补一次选中态
 
     api('/api/stats').then(renderStats).catch(() => {});
     renderMarks($('#mine-marks'), 5);
@@ -2604,6 +2853,7 @@
     } catch (e) {
       toast('读取本地数据失败');
     }
+    applyTheme();   // 拿到设置后再定一次浅色/深色（内联脚本只负责首屏不闪白）
     applySettings();
     if (!location.hash) location.hash = '#/shelf';
     render();
