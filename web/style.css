@@ -923,6 +923,8 @@ body {
 .gp-item:hover { background: rgba(120, 150, 220, .14); }
 .gp-item.on { color: var(--accent-2); font-weight: 600; background: var(--accent-soft); }
 .gp-item svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.gp-side { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.gp-side .kind-tag { margin-left: 0; }
 .gp-sep { height: 1px; margin: 6px 10px; background: rgba(120, 145, 190, .24); }
 .gp-sep-label {
   margin: 8px 12px 4px; font-size: 10.5px; font-weight: 600;

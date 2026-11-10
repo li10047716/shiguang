@@ -121,7 +121,7 @@
       items.map((it, i) => it.sep
         ? (it.label ? `<div class="gp-sep-label">${esc(it.label)}</div>` : '<div class="gp-sep"></div>')
         : `<button class="gp-item ${it.on ? 'on' : ''} ${it.danger ? 'danger' : ''}" data-i="${i}">
-        <span>${esc(it.label)}</span>${it.on ? ICONS.check : ''}</button>`).join('');
+        <span>${esc(it.label)}</span><span class="gp-side">${it.tagHtml || ''}${it.on ? ICONS.check : ''}</span></button>`).join('');
     document.body.appendChild(el);
     const r = anchor.getBoundingClientRect();
     const w = Math.min(236, window.innerWidth - 24);
@@ -1263,12 +1263,13 @@
     });
     $('#disc-src').addEventListener('click', (e) => {
       e.stopPropagation();
-      togglePop(e.currentTarget, 'disc-src', [
-        { sep: true, label: '小说' },
-        ...DISC_SRC_NOVEL.map(([k, n]) => ({ label: n, on: k === src, run: () => go(`#/discover?src=${k}`) })),
-        { sep: true, label: '漫画' },
-        ...DISC_SRC_COMIC.map(([k, n]) => ({ label: n, on: k === src, run: () => go(`#/discover?src=${k}`) })),
-      ], '选择书源');
+      const TAG_NOVEL = '<i class="kind-tag kt-novel">小说</i>';
+      const TAG_COMIC = '<i class="kind-tag kt-comic">漫画</i>';
+      togglePop(e.currentTarget, 'disc-src', DISC_SRC.map(([k, n]) => ({
+        label: n,
+        tagHtml: isComicDisc(k) ? TAG_COMIC : TAG_NOVEL,
+        on: k === src, run: () => go(`#/discover?src=${k}`),
+      })), '选择书源');
     });
     $('#disc-refresh').addEventListener('click', () => {
       toast('正在刷新…');
@@ -1779,8 +1780,11 @@
     $('#s-dots').addEventListener('click', (e) => {
       e.stopPropagation();
       const off = new Set(state.settings.disabledSources || []);
-      const pick = (k, n) => ({
+      const TAG_NOVEL = '<i class="kind-tag kt-novel">小说</i>';
+      const TAG_COMIC = '<i class="kind-tag kt-comic">漫画</i>';
+      const pick = (k, n, t) => ({
         label: (k !== 'all' && off.has(k)) ? `${n}（已关闭）` : n,
+        tagHtml: t === 'comic' ? TAG_COMIC : (t === 'novel' ? TAG_NOVEL : ''),
         on: k === $('#ssrc').value,
         run: () => {
           $('#ssrc').value = k;
@@ -1791,10 +1795,8 @@
       });
       togglePop(e.currentTarget, 'search-src', [
         pick('all', '全部书源'),
-        { sep: true, label: '小说' },
-        ...SEARCH_SOURCES.filter(([, , t]) => t === 'novel').map(([k, n]) => pick(k, n)),
-        { sep: true, label: '漫画' },
-        ...SEARCH_SOURCES.filter(([, , t]) => t === 'comic').map(([k, n]) => pick(k, n)),
+        ...SEARCH_SOURCES.filter(([, , t]) => t === 'novel').map(([k, n, t]) => pick(k, n, t)),
+        ...SEARCH_SOURCES.filter(([, , t]) => t === 'comic').map(([k, n, t]) => pick(k, n, t)),
         { sep: true },
         { label: '书源健康与开关', run: () => go('#/mine?tab=source') },
       ], '选择书源');
