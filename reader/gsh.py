@@ -443,3 +443,63 @@ def page_bytes(url, timeout=20):
     if not blob:
         raise RuntimeError("图片没有下载下来")
     return blob, ctype or "image/webp"
+
+
+# ---------------------------------------------------------------- 发现（榜单 / 分类）
+
+RANKS = [("hots", "人气推荐"), ("dayup", "热门更新"), ("newss", "最新上架")]
+CATS = [("manga", "全部类型")]
+
+
+def _list_page(path, page, rank_base=0):
+    """manhuafree 列表页通用解析（/hots /dayup /newss /manga，/page/N 翻页）。"""
+    page = max(1, int(page or 1))
+    url = "%s%s/page/%d" % (WEB, path, page) if page > 1 else WEB + path
+    html = _http(url)
+    books, seen = [], set()
+    for chunk in html.split(_CARD_SPLIT)[1:]:
+        am = re.search(r'<a href="(/manga/[^"]+)"', chunk)
+        if not am:
+            continue
+        slug = am.group(1).rstrip("/").split("/")[-1]
+        if not re.fullmatch(r"[a-z0-9][a-z0-9\-]{1,80}", slug) or slug in seen:
+            continue
+        tm = re.search(r'class="cardtitle"[^>]*>(.*?)</h3>', chunk, re.S)
+        title = _clean(tm.group(1)) if tm else ""
+        if not title:
+            continue
+        seen.add(slug)
+        im = re.search(r'<img[^>]+src="([^"]+)"', chunk)
+        books.append({
+            "id": PREFIX + slug,
+            "title": title,
+            "author": "",
+            "cover": (im.group(1) if im else ""),
+            "url": SCHEME + slug,
+            "category": "漫画",
+            "intro": "",
+            "source": SRC_NAME,
+            "kind": "comic",
+            "unit": "话",
+            "rank": rank_base + len(books) + 1,
+        })
+    pages = 1
+    for pm in re.finditer(r'href="%s/page/(\d+)"' % re.escape(path), html):
+        pages = max(pages, int(pm.group(1)))
+    pages = min(pages, 200)
+    if page > pages:
+        fixed = _list_page(path, pages)
+        fixed["clamped"] = True
+        return fixed
+    return {"title": "%s · 第 %d 页" % (path.strip("/") or "全部类型", page),
+            "books": books, "page": page, "pages": max(1, pages)}
+
+
+def ranking(kind="hots", page=1):
+    kind = kind if kind in ("hots", "dayup", "newss") else "hots"
+    return _list_page("/" + kind, page)
+
+
+def category(cid="manga", page=1):
+    # 站点没有子分类，/manga 就是全库列表
+    return _list_page("/manga", page)

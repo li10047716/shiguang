@@ -401,3 +401,106 @@ def page_bytes(url):
     if dec[:4] == b"\x89PNG":
         return dec, "image/png"
     raise RuntimeError("漫蛙图片解密后不是有效图片，可能站点已换加密或域名失效")
+
+
+# ---------------------------------------------------------------- 发现（榜单 / 分类）
+
+RANKS = [("hot", "人气榜"), ("newest", "新番榜"), ("end", "完结榜")]
+# 分类 = booklist 的单个筛选参数；cid 形如 "gender=0" / "area=3"，all 表示全部
+CATS = [
+    ("all", "全部"), ("gender=2", "一般向"), ("gender=0", "BL向"), ("gender=1", "禁漫"),
+    ("gender=3", "TL向"), ("gender=4", "GL向"), ("area=2", "韩国"), ("area=3", "日漫"),
+    ("area=4", "国漫"), ("area=5", "台漫"), ("area=6", "其他"),
+]
+
+
+def _rank_cards(html):
+    books = []
+    for chunk in re.split(r'<a href="/book/', html)[1:]:
+        am = re.match(r'(\d+)"[^>]*title="([^"]*)"', chunk)
+        if not am:
+            continue
+        bid, title = am.group(1), _clean(am.group(2))
+        if not title:
+            continue
+        im = re.search(r'data-original="([^"]+)"', chunk)
+        books.append({
+            "id": PREFIX + bid,
+            "title": title,
+            "author": "",
+            "cover": (im.group(1) if im else ""),
+            "url": SCHEME + bid,
+            "category": "漫画",
+            "intro": "",
+            "source": SRC_NAME,
+            "kind": "comic",
+            "unit": "话",
+            "rank": len(books) + 1,
+        })
+    return books
+
+
+def ranking(kind="hot", page=1):
+    """/rank 单页三个榜（data-type=newest/hot/end），?page=N&type=X 翻页。"""
+    kind = kind if kind in ("hot", "newest", "end") else "hot"
+    page = max(1, int(page or 1))
+    html = _http("%s/rank?page=%d&type=%s" % (manwa_base(), page, kind))
+    # 只取对应榜单的 <ul class="rank-list" data-type="..."> 段
+    m = re.search(r'<ul class="rank-list"[^>]*data-type="%s"[^>]*>(.*?)</ul>' % kind, html, re.S)
+    books = _rank_cards(m.group(1)) if m else _rank_cards(html)
+    pages = 6
+    pm = re.search(r'data-type="%s"[^>]*data-page="(\d+)"' % kind, html)
+    if pm:
+        pages = max(1, int(pm.group(1)))
+    if page > pages:
+        fixed = ranking(kind, pages)
+        fixed["clamped"] = True
+        return fixed
+    return {"title": "%s · 第 %d 页" % (dict(RANKS).get(kind, "排行"), page),
+            "books": books, "page": page, "pages": pages}
+
+
+def category(cid="all", page=1):
+    """/booklist 筛选：cid 是 "k=v" 参数或 all。"""
+    cid = str(cid or "all").strip()
+    if cid != "all" and not re.fullmatch(r"(?:gender|area|end)=[\-\d]+", cid):
+        cid = "all"
+    page = max(1, int(page or 1))
+    url = "%s/booklist?%s&page=%d" % (manwa_base(), cid, page) if cid != "all" \
+        else "%s/booklist?page=%d" % (manwa_base(), page)
+    html = _http(url)
+    books, seen = [], set()
+    for chunk in re.split(r'<li\s*>', html)[1:]:
+        am = re.search(r'href="(/book/(\d+))"[^>]*title="([^"]*)"', chunk)
+        if not am:
+            continue
+        bid, title = am.group(2), _clean(am.group(3))
+        if not title or bid in seen:
+            continue
+        seen.add(bid)
+        im = re.search(r'<img[^>]+src="([^"]+)"', chunk)
+        tip = re.search(r'class="manga-list-2-tip[^"]*"[^>]*>([^<]{1,40})<', chunk)
+        books.append({
+            "id": PREFIX + bid,
+            "title": title,
+            "author": "",
+            "cover": (im.group(1) if im else ""),
+            "url": SCHEME + bid,
+            "category": "漫画",
+            "intro": _clean(tip.group(1)) if tip else "",
+            "source": SRC_NAME,
+            "kind": "comic",
+            "unit": "话",
+            "rank": len(books) + 1,
+        })
+    pages = 1
+    for pm in re.finditer(r'data-page="(\d+)"', html):
+        pages = max(pages, int(pm.group(1)))
+    pages = min(pages, 100)
+    if page > pages:
+        fixed = category(cid, pages)
+        fixed["clamped"] = True
+        return fixed
+    name = dict(CATS).get(cid, "全部")
+    return {"title": "%s · 第 %d 页" % (name, page), "books": books,
+            "page": page, "pages": max(1, pages)}

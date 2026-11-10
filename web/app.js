@@ -1053,7 +1053,10 @@
   }
 
   // ---------------------------------------------------------------- 视图：发现
-  const DISC_SRC = [['sd', '速读谷'], ['qm', '七猫'], ['sq', '书旗'], ['qb', '全本网'], ['bc', '八叉'], ['bl', '八一'], ['dq', '得奇'], ['ali', '爱丽丝']];
+  const DISC_SRC_NOVEL = [['sd', '速读谷'], ['qm', '七猫'], ['sq', '书旗'], ['qb', '全本网'], ['bc', '八叉'], ['bl', '八一'], ['dq', '得奇'], ['ali', '爱丽丝']];
+  const DISC_SRC_COMIC = [['gs', '包子漫画'], ['kk', '快看漫画'], ['dr', '大人漫画'], ['mw', '漫蛙漫画'], ['mkz', '漫客栈']];
+  const DISC_SRC = [...DISC_SRC_NOVEL, ...DISC_SRC_COMIC];
+  const isComicDisc = (src) => DISC_SRC_COMIC.some(([k]) => k === src);
   const SD_DISC_CATS = [['1', '玄幻'], ['2', '仙侠'], ['3', '都市'], ['4', '历史'],
     ['5', '军事'], ['6', '科幻'], ['7', '言情']];
   const QM_DISC_CATS = [['203', '都市'], ['219', '都市高武'], ['202', '玄幻奇幻'],
@@ -1114,6 +1117,45 @@
     dq: (c, p) => `/api/dq/sort?c=${encodeURIComponent(c)}&p=${p}`,
     ali: (c, p) => `/api/ali/sort?c=${encodeURIComponent(c)}&p=${p}`,
   };
+  // ---------------- 漫画源发现：kk 没有榜单（只有分类），mkz 分类要登录签名（只有榜单）
+  const DISC_RANKS_C = {
+    gs: ['hots', 'dayup', 'newss'],
+    dr: ['all', 'daily', 'weekly', 'monthly'],
+    mw: ['hot', 'newest', 'end'],
+    mkz: ['popularity', 'ascension', 'collection', 'comment', 'latest', 'update'],
+  };
+  const RANK_NAMES_C = {
+    gs: { hots: '人气推荐', dayup: '热门更新', newss: '最新上架' },
+    dr: { all: '总榜', daily: '日榜', weekly: '周榜', monthly: '月榜' },
+    mw: { hot: '人气榜', newest: '新番榜', end: '完结榜' },
+    mkz: { popularity: '人气榜', ascension: '上升榜', collection: '收藏榜',
+      comment: '热评榜', latest: '新作榜', update: '最近更新' },
+  };
+  const RANK_API_C = {
+    gs: (k, p) => `/api/comic/rank?src=gs&kind=${k}&p=${p}`,
+    dr: (k, p) => `/api/comic/rank?src=dr&kind=${k}&p=${p}`,
+    mw: (k, p) => `/api/comic/rank?src=mw&kind=${k}&p=${p}`,
+    mkz: (k, p) => `/api/comic/rank?src=mkz&kind=${k}&p=${p}`,
+  };
+  const DISC_CATS_C = {
+    gs: [['manga', '全部类型']],
+    kk: [[0, '全部'], [20, '恋爱'], [46, '古风'], [77, '大女主'], [80, '穿越'],
+      [74, '校园'], [63, '玄幻'], [52, '总裁'], [48, '都市'], [22, '奇幻'],
+      [67, '热血'], [23, '剧情'], [65, '悬疑'], [85, '武侠'], [71, '搞笑'],
+      [54, '治愈'], [62, '萌系'], [68, '异能'], [86, '系统'], [89, '重生'],
+      [81, '恐怖'], [91, '末世'], [92, '非人类']],
+    dr: [['/comics-catalog/all/ob/hits/st/all', '全部'],
+      ['/comics-catalog/韩漫/ob/hits/st/all', '韩漫'],
+      ['/comics-catalog/日漫/ob/hits/st/all', '日漫'],
+      ['/comics-catalog/真人/ob/hits/st/all', '真人'],
+      ['/comics-catalog/3D漫画/ob/hits/st/all', '3D'],
+      ['/comics-catalog/all/ob/hits/st/serialized', '连载'],
+      ['/comics-catalog/all/ob/hits/st/completed', '完结']],
+    mw: [['all', '全部'], ['gender=2', '一般向'], ['gender=0', 'BL向'], ['gender=1', '禁漫'],
+      ['gender=3', 'TL向'], ['gender=4', 'GL向'], ['area=2', '韩国'], ['area=3', '日漫'],
+      ['area=4', '国漫'], ['area=5', '台漫'], ['area=6', '其他']],
+  };
+  const CAT_API_C = (src, c, p) => `/api/comic/cat?src=${src}&c=${encodeURIComponent(c)}&p=${p}`;
 
   function discHash(src, o) {
     const u = new URLSearchParams();
@@ -1141,18 +1183,39 @@
     </a>`;
   }
 
+  function discItemComic(b, src) {
+    const label = (DISC_SRC.find(([k]) => k === src) || ['', '漫画'])[1];
+    const meta = [b.category, b.status, b.words || (b.count ? '共' + b.count + '话' : '')]
+      .filter(Boolean).join(' · ');
+    const tag = b.status && /完结/.test(b.status) ? '<span class="cv-tag done">完</span>' : '';
+    const last = b.latest ? '最新：' + b.latest : (b.intro || '');
+    return `<a class="disc-card" href="#/book/${encodeURIComponent(b.id)}">
+      ${coverBox(b, tag)}
+      <div class="dc-body">
+        <div class="dc-title">${esc(b.title)}</div>
+        <div class="dc-author">${esc(b.author || '')}</div>
+        <div class="dc-line">来源：${esc(b.source || label)}</div>
+        <div class="dc-line">${esc(meta || '漫画')}</div>
+        <div class="dc-latest">${esc(last || '—')}</div>
+      </div>
+    </a>`;
+  }
+
   async function viewDiscover(q) {
     setNav('discover');
     const src = DISC_SRC.some(([k]) => k === q.get('src')) ? q.get('src') : 'sd';
-    const cats = DISC_CATS[src];
-    const ranks = DISC_RANKS[src];
-    const mode = q.has('cat') ? 'cat' : 'rank';
-    const cat = q.has('cat') ? q.get('cat') : cats[0][0];
-    const catName = (cats.find(([id]) => String(id) === String(cat)) || cats[0])[1];
+    const comic = isComicDisc(src);
+    const cats = comic ? (DISC_CATS_C[src] || []) : DISC_CATS[src];
+    const ranks = comic ? (DISC_RANKS_C[src] || []) : DISC_RANKS[src];
+    const mode = q.has('cat') ? 'cat' : (q.has('rank') ? 'rank' : (ranks.length ? 'rank' : 'cat'));
+    const cat = q.has('cat') ? q.get('cat') : (cats[0] ? cats[0][0] : '');
+    const catName = (cats.find(([id]) => String(id) === String(cat)) || cats[0] || ['', ''])[1];
     const rank = ranks.includes(q.get('rank')) ? q.get('rank') : ranks[0];
     const p = q.get('p') || '1';
     const srcLabel = (DISC_SRC.find(([k]) => k === src) || ['', '速读谷'])[1];
-    const rankLabels = [`${catName}排行榜`, `完本${catName}小说`, `最新${catName}小说`];
+    const rankLabels = comic
+      ? ranks.map((k) => (RANK_NAMES_C[src] || {})[k] || k)
+      : [`${catName}排行榜`, `完本${catName}小说`, `最新${catName}小说`];
 
     view.innerHTML = `<div class="page disc-page">
       <div class="glass-topbar">
@@ -1160,15 +1223,15 @@
         <button class="g-src" id="disc-src" data-pop>${esc(srcLabel)}${ICONS.chev}</button>
         <button class="g-circle" id="disc-refresh" title="刷新">${ICONS.refresh}</button>
       </div>
-      <div class="cat-row">
+      ${cats.length ? `<div class="cat-row">
         <div class="cat-scroll">${cats.map(([id, n]) =>
           `<button class="chip ${String(id) === String(cat) ? 'on' : ''}" data-cat="${esc(id)}">${esc(n)}</button>`).join('')}</div>
-        <button class="g-ico cat-all" id="disc-cats" title="全部分类">${ICONS.filter}</button>
+        ${cats.length > 1 ? `<button class="g-ico cat-all" id="disc-cats" title="全部分类">${ICONS.filter}</button>` : ''}
       </div>
       <div class="cats-panel" id="cats-panel" hidden>${cats.map(([id, n]) =>
-        `<button class="chip ${String(id) === String(cat) ? 'on' : ''}" data-cat="${esc(id)}">${esc(n)}</button>`).join('')}</div>
-      <div class="rank-row">${ranks.map((k, i) =>
-        `<button class="chip rchip ${mode === 'rank' && k === rank ? 'on' : ''}" data-rank="${k}">${esc(rankLabels[i])}</button>`).join('')}</div>
+        `<button class="chip ${String(id) === String(cat) ? 'on' : ''}" data-cat="${esc(id)}">${esc(n)}</button>`).join('')}</div>` : ''}
+      ${ranks.length ? `<div class="rank-row">${ranks.map((k, i) =>
+        `<button class="chip rchip ${mode === 'rank' && k === rank ? 'on' : ''}" data-rank="${k}">${esc(rankLabels[i])}</button>`).join('')}</div>` : ''}
       <div id="disc-list" class="disc-list">
         ${Array(4).fill('<div class="disc-skel"><div class="skel sk-cover"></div><div class="sk-lines"><i class="skel"></i><i class="skel"></i><i class="skel"></i><i class="skel"></i></div></div>').join('')}
       </div>
@@ -1178,7 +1241,8 @@
       go(discHash(src, { rank: b.dataset.rank }))));
     view.querySelectorAll('[data-cat]').forEach((b) => b.addEventListener('click', () =>
       go(discHash(src, { cat: b.dataset.cat }))));
-    $('#disc-cats').addEventListener('click', () => {
+    const catsBtn = $('#disc-cats');
+    if (catsBtn) catsBtn.addEventListener('click', () => {
       const panel = $('#cats-panel');
       panel.hidden = !panel.hidden;
     });
@@ -1206,16 +1270,19 @@
       $('#disc-retry').addEventListener('click', () => go(refreshHash()));
     };
     try {
-      const url = mode === 'cat' ? CAT_API[src](cat, p) : RANK_API[src](rank, p);
+      const url = comic
+        ? (mode === 'cat' ? CAT_API_C(src, cat, p) : RANK_API_C[src](rank, p))
+        : (mode === 'cat' ? CAT_API[src](cat, p) : RANK_API[src](rank, p));
       const data = await api(url);
       if (seq !== DISC_SEQ[0]) return;
-      const books = (data.books || []).slice(0, 40);
+      const books = (data.books || []).slice(0, comic ? 60 : 40);
       if (!books.length) { failBox('这个栏目暂时没有内容，换个书源或刷新试试'); return; }
       box.innerHTML =
         (data.note ? `<p class="rank-note">${esc(data.note)}</p>` : '') +
-        books.map((b) => discItem(b, src)).join('') +
+        books.map((b) => (comic ? discItemComic(b, src) : discItem(b, src))).join('') +
         pager(Number(data.page || p), data.pages) +
-        `<div class="disc-all"><a href="#/rank?src=${src}&kind=${mode === 'rank' ? rank : ranks[0]}">查看完整榜单 →</a></div>`;
+        (comic ? '' :
+          `<div class="disc-all"><a href="#/rank?src=${src}&kind=${mode === 'rank' ? rank : ranks[0]}">查看完整榜单 →</a></div>`);
       wirePager(box, (np) => go(discHash(src, {
         rank: mode === 'rank' ? rank : null, cat: mode === 'cat' ? cat : null, p: np,
       })));

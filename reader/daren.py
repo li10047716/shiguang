@@ -363,3 +363,80 @@ def page_bytes(url, timeout=20):
     if not raw:
         raise RuntimeError("图片没有下载下来")
     return raw, (ctype or "image/jpeg").split(";")[0].strip().lower()
+
+
+# ---------------------------------------------------------------- 发现（榜单 / 分类）
+
+RANKS = [("all", "总榜"), ("daily", "日榜"), ("weekly", "周榜"), ("monthly", "月榜")]
+# 分类 = 题材 × 状态 的组合，cid 直接用站点的 URL 片段
+_CATS_THEME = [("all", "全部"), ("韩漫", "韩漫"), ("日漫", "日漫"), ("真人", "真人"), ("3D漫画", "3D")]
+_CATS_STATE = [("all", ""), ("serialized", "·连载"), ("completed", "·完结")]
+CATS = [(u"/comics-catalog/%s/ob/hits/st/%s" % (t, s), name + tag)
+        for (t, name) in _CATS_THEME for (s, tag) in _CATS_STATE]
+
+
+def _cards(html):
+    """hl-list-item 卡片：缩略图链接 + 标题 + 封面 + 状态。"""
+    books, seen = [], set()
+    for chunk in re.split(r'<li class="hl-list-item', html)[1:]:
+        am = re.search(r'href="(/comics-reading/(\d+)\.html)"', chunk)
+        if not am:
+            continue
+        bid = am.group(2)
+        if bid in seen:
+            continue
+        seen.add(bid)
+        tm = re.search(r'title="([^"]+)"', chunk)
+        title = _clean(tm.group(1)) if tm else ""
+        if not title:
+            continue
+        im = re.search(r'data-original="([^"]+)"', chunk)
+        st = re.search(r'class="remarks[^"]*"[^>]*>([^<]{1,10})<', chunk)
+        books.append({
+            "id": PREFIX + bid,
+            "title": title,
+            "author": "",
+            "cover": (im.group(1) if im else ""),
+            "url": SCHEME + bid,
+            "category": "漫画",
+            "status": (st.group(1).strip() if st else ""),
+            "intro": "",
+            "source": SRC_NAME,
+            "kind": "comic",
+            "unit": "话",
+            "rank": len(books) + 1,
+        })
+    return books
+
+
+def ranking(kind="all", page=1):
+    kind = kind if kind in ("all", "daily", "weekly", "monthly") else "all"
+    url = WEB + ("/desirable-comics/%s" % kind if kind != "all" else "/desirable-comics")
+    html = _http(url)
+    books = _cards(html)
+    # 榜单页不支持翻页，一次给全（约 96 本）
+    return {"title": dict(RANKS).get(kind, "排行"), "books": books,
+            "page": 1, "pages": 1}
+
+
+def category(cid="/comics-catalog/all/ob/hits/st/all", page=1):
+    cid = str(cid or "").strip()
+    if not re.fullmatch(r"/comics-catalog/[\w/\-]+", cid) or "/ob/" not in cid:
+        cid = "/comics-catalog/all/ob/hits/st/all"
+    page = max(1, int(page or 1))
+    url = WEB + urllib.parse.quote(cid)
+    if page > 1:
+        url += "/page/%d" % page
+    html = _http(url)
+    books = _cards(html)
+    pages = 1
+    for pm in re.finditer(r'href="[^"]*/page/(\d+)"', html):
+        pages = max(pages, int(pm.group(1)))
+    if page > pages and page > 1:
+        fixed = category(cid, pages)
+        fixed["clamped"] = True
+        return fixed
+    name = cid.rstrip("/").split("/")
+    label = "%s%s" % (name[2] if len(name) > 2 else "全部", name[-1] if name[-1] != "all" else "")
+    return {"title": "分类 %s · 第 %d 页" % (label, page), "books": books,
+            "page": page, "pages": max(1, pages)}

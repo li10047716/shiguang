@@ -274,3 +274,69 @@ def page_bytes(url, timeout=20):
     if not blob:
         raise RuntimeError("图片没有下载下来")
     return blob, ctype or "image/webp"
+
+
+# ---------------------------------------------------------------- 发现（分类浏览）
+# 站点没有网页端榜单，发现页提供 23 个官方分类（数据来自 tag 页 topicCategories）。
+
+CATS = [
+    (0, "全部"), (20, "恋爱"), (46, "古风"), (77, "大女主"), (80, "穿越"),
+    (74, "校园"), (63, "玄幻"), (52, "总裁"), (48, "都市"), (22, "奇幻"),
+    (67, "热血"), (23, "剧情"), (65, "悬疑"), (85, "武侠"), (71, "搞笑"),
+    (54, "治愈"), (62, "萌系"), (68, "异能"), (86, "系统"), (89, "重生"),
+    (81, "恐怖"), (91, "末世"), (92, "非人类"),
+]
+
+
+def category(cid=0, page=1):
+    """分类浏览：/tag/<id>?state=3&page=N，NUXT 里 filerList 带封面/话数/收藏数。"""
+    cid = int(cid or 0)
+    page = max(1, int(page or 1))
+    d = _nuxt_page("%s/tag/%d?state=3&page=%d" % (WEB, cid, page))
+    rows = d.get("filerList") or []
+    books = []
+    for b in rows:
+        tid = str(b.get("id") or "")
+        if not tid.isdigit():
+            continue
+        tags = [t for t in (b.get("tags") or []) if t]
+        fav = 0
+        try:
+            fav = int(b.get("favouriteCount") or 0)
+        except (TypeError, ValueError):
+            fav = 0
+        heat = ("%.1f万收藏" % (fav / 10000.0)) if fav >= 10000 else (str(fav) if fav else "")
+        cnt = ""
+        try:
+            cnt = "%d" % int(b.get("comicsCount") or 0)
+        except (TypeError, ValueError):
+            cnt = ""
+        books.append({
+            "id": PREFIX + tid,
+            "title": b.get("title") or "",
+            "author": "",
+            "cover": b.get("coverImageUrl") or b.get("imgSrc") or "",
+            "url": SCHEME + tid,
+            "category": " · ".join(tags[:2]) or "漫画",
+            "words": heat,
+            "intro": "",
+            "source": SRC_NAME,
+            "kind": "comic",
+            "unit": "话",
+            "count": cnt,
+            "rank": len(books) + 1,
+        })
+    total = 0
+    try:
+        total = int(d.get("total") or 0)
+    except (TypeError, ValueError):
+        total = 0
+    pages = max(1, (total + 19) // 20) if total else 1
+    pages = min(pages, 500)
+    if not books and page > 1:
+        fixed = category(cid, pages)
+        fixed["clamped"] = True
+        return fixed
+    name = dict(CATS).get(cid, "全部")
+    return {"title": "%s · 第 %d 页" % (name, page), "books": books,
+            "page": page, "pages": pages}

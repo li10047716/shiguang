@@ -1195,6 +1195,71 @@ def api_ali_ranking(kind, page):
     return data
 
 
+# ---------------------------------------------------------------- 漫画发现（榜单 / 分类）
+
+_COMIC_DISC = {"gs": gsh, "kk": kuaikan, "dr": daren, "mw": manwa, "mkz": mkz}
+
+
+def _comic_disc_mod(src):
+    mod = _COMIC_DISC.get(str(src or ""))
+    if mod is None:
+        raise RuntimeError("未知漫画源")
+    return mod
+
+
+def api_comic_rank(src, kind, page):
+    """漫画榜单，缓存 10 分钟；失败回退旧缓存（与小说榜单同一套策略）。"""
+    mod = _comic_disc_mod(src)
+    kinds = [k for k, _ in getattr(mod, "RANKS", [])]
+    kind = kind if kind in kinds else (kinds[0] if kinds else "")
+    try:
+        p = max(1, int(page or 1))
+    except (TypeError, ValueError):
+        p = 1
+    key = "crank_%s_%s_%d" % (src, kind or "all", p)
+    data = cache_get(key, ttl=600)
+    if data:
+        return data
+    old = cache_get(key)
+    try:
+        data = mod.ranking(kind, p)
+    except Exception:
+        if old:
+            old["note"] = "网络异常，显示上次抓取的内容"
+            return old
+        raise
+    if data.get("books"):
+        cache_set(key, data)
+    elif old:
+        return old
+    return data
+
+
+def api_comic_cat(src, cid, page):
+    """漫画分类浏览，缓存 5 分钟。cid 直接透传给源模块（每源格式不同）。"""
+    mod = _comic_disc_mod(src)
+    try:
+        p = max(1, int(page or 1))
+    except (TypeError, ValueError):
+        p = 1
+    key = "ccat_%s_%s_%d" % (src, str(cid or "all")[:60], p)
+    data = cache_get(key, ttl=300)
+    if data:
+        return data
+    old = cache_get(key)
+    try:
+        data = mod.category(cid, p)
+    except Exception:
+        if old:
+            return old
+        raise
+    if data.get("books"):
+        cache_set(key, data)
+    elif old:
+        return old
+    return data
+
+
 _IMG_LOCK = threading.Lock()
 _IMG_BUSY = set()
 
@@ -1625,6 +1690,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(api_ali_sort(self._arg("c", "65"), self._arg("p", "1")))
         if path == "/api/ranking":
             return self._json(api_ranking(self._arg("kind", "top"), self._arg("p", "1")))
+        if path == "/api/comic/rank":
+            try:
+                return self._json(api_comic_rank(self._arg("src", ""), self._arg("kind", ""), self._arg("p", "1")))
+            except Exception as e:  # noqa: BLE001
+                return self._json({"error": str(e)}, 502)
+        if path == "/api/comic/cat":
+            try:
+                return self._json(api_comic_cat(self._arg("src", ""), self._arg("c", ""), self._arg("p", "1")))
+            except Exception as e:  # noqa: BLE001
+                return self._json({"error": str(e)}, 502)
         if path == "/api/img":
             blob = api_img(self._arg("u"))
             if not blob:

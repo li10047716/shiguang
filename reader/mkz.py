@@ -237,3 +237,61 @@ def page_bytes(url, timeout=20):
     if not blob:
         raise RuntimeError("图片没有下载下来")
     return blob, ctype or "image/jpeg"
+
+
+# ---------------------------------------------------------------- 发现（榜单）
+# 分类接口要登录签名（uid+sign），发现页只提供榜单中心 /top/ 的五张榜 + 最近更新。
+
+RANKS = [
+    ("popularity", "人气榜"), ("ascension", "上升榜"), ("collection", "收藏榜"),
+    ("comment", "热评榜"), ("latest", "新作榜"), ("update", "最近更新"),
+]
+
+
+def _rank_page(path):
+    """榜单页通用解析：三种卡片（top-list__box-item / top-list__item / common-comic-item）
+    都带 封面链接 + 标题，多数带作者/简介/更新到。"""
+    html = _http(WEB + path)
+    books, seen = [], set()
+    for chunk in re.split(r'<div class="(?:top-list__box-item|top-list__item|common-comic-item)', html)[1:]:
+        am = re.search(r'<a class="cover" href="/(\d{3,8})/"[^>]*>', chunk)
+        if not am:
+            continue
+        bid = am.group(1)
+        if bid in seen:
+            continue
+        seen.add(bid)
+        nm = re.search(r'<p class="comic_?_?title"><a[^>]*>(.*?)</a>', chunk, re.S)
+        title = _clean(nm.group(1)) if nm else ""
+        if not title:
+            continue
+        im = re.search(r'<img[^>]+data-src="([^"]+)"', chunk)
+        au = re.search(r'作者：<a[^>]*>([^<]+)</a>', chunk)
+        ft = re.search(r'<p class="comic-feature">(.*?)</p>', chunk, re.S)
+        up = re.search(r'更至：<a[^>]*>([^<]+)</a>', chunk)
+        rn = re.search(r'<span class="tag tag--?\d*">(\d+)</span>', chunk)
+        books.append({
+            "id": PREFIX + bid,
+            "title": title,
+            "author": _clean(au.group(1)) if au else "",
+            "cover": (im.group(1) if im else ""),
+            "url": SCHEME + bid,
+            "category": "漫画",
+            "intro": _clean(ft.group(1))[:120] if ft else "",
+            "latest": _clean(up.group(1)) if up else "",
+            "source": SRC_NAME,
+            "kind": "comic",
+            "unit": "话",
+            "rank": int(rn.group(1)) if rn else len(books) + 1,
+        })
+    return books
+
+
+def ranking(kind="popularity", page=1):
+    kind = kind if kind in ("popularity", "ascension", "collection",
+                            "comment", "latest", "update") else "popularity"
+    path = "/update/" if kind == "update" else ("/top/%s/" % kind)
+    books = _rank_page(path)
+    # 榜单页一次给全（几十到一百多本），无翻页
+    return {"title": dict(RANKS).get(kind, "排行"), "books": books,
+            "page": 1, "pages": 1}
