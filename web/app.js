@@ -67,6 +67,7 @@
     '得奇小说网': ['dq', '得奇'],
     '爱丽丝书屋': ['ali', '爱丽丝'],
     '包子漫画': ['gs', '包子'],
+    '快看漫画': ['kk', '快看'],
     '本地导入': ['loc', '本地'],
   };
   const isLocalBook = (id) => String(id || '').startsWith('loc:');
@@ -648,9 +649,9 @@
     </${tag}>`;
   }
 
-  // 在线漫画：粘作品地址（漫客栈 / 包子漫画都认），不支持关键词搜索入架
+  // 在线漫画：粘作品地址（漫客栈 / 包子漫画 / 快看漫画都认）；包子、快看还能直接搜
   function addOnlineComic() {
-    askInput('粘贴漫画作品链接', 'https://manhuafree.com/manga/…', async (v) => {
+    askInput('粘贴漫画作品链接', 'https://www.kuaikanmanhua.com/mobile/1165/list/', async (v) => {
       let b = null;
       try {
         b = await post('/api/comic/open', { url: v });
@@ -1586,7 +1587,7 @@
   // ---------------------------------------------------------------- 视图：搜索
   const SEARCH_SOURCES = [['all', '全部书源'], ['sd', '速读谷'], ['qm', '七猫'], ['sq', '书旗'],
     ['qb', '全本网'], ['bc', '八叉'], ['bl', '八一'], ['dq', '得奇'], ['ali', '爱丽丝'],
-    ['gs', '包子漫画']];
+    ['gs', '包子漫画'], ['kk', '快看漫画']];
   const HIST_KEY = 'sg.search.history';
   const SEARCH_SRC_KEY = 'sg.search.src';
   const PREF_SRC_KEY = 'sg.pref.src';           // 上次在折叠组里选过的书源
@@ -1752,7 +1753,8 @@
       const cnt = (name) => books.filter((b) => b.source === name).length;
       const mix = [['速读谷', cnt('速读谷')], ['七猫', cnt('七猫')], ['书旗', cnt('书旗')],
         ['全本网', cnt('全本小说网')], ['八叉', cnt('八叉书库')], ['八一', cnt('八一中文网')],
-        ['得奇', cnt('得奇小说网')], ['爱丽丝', cnt('爱丽丝书屋')], ['包子', cnt('包子漫画')]]
+        ['得奇', cnt('得奇小说网')], ['爱丽丝', cnt('爱丽丝书屋')], ['包子', cnt('包子漫画')],
+        ['快看', cnt('快看漫画')]]
         .filter(([, n]) => n).map(([name, n]) => `${name} ${n} 本`).join(' · ');
       const merged = books.length - groups.length;
       const multi = groups.filter((g) => g.list.length > 1).length;
@@ -3033,7 +3035,8 @@
 
   // ---------------------------------------------------------------- 书源健康面板（我的页底部）
   const HEALTH_SOURCES = [['sd', '速读谷'], ['qm', '七猫'], ['sq', '书旗'], ['qb', '全本网'],
-    ['bc', '八叉'], ['bl', '八一'], ['dq', '得奇'], ['ali', '爱丽丝'], ['gs', '包子漫画']];
+    ['bc', '八叉'], ['bl', '八一'], ['dq', '得奇'], ['ali', '爱丽丝'], ['gs', '包子漫画'],
+    ['kk', '快看漫画']];
   let healthTimer = null;
 
   function loadHealth(refresh = false) {

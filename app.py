@@ -37,7 +37,7 @@ if sys.platform in ("ios", "android") or os.environ.get("SUDUGU_EMBEDDED"):
     _ca = os.path.join(ROOT, "cacert.pem")
     if os.path.exists(_ca):
         os.environ.setdefault("SSL_CERT_FILE", _ca)
-from reader import ali, bc, blxs, core, dq, gsh, mkz, qbxs, qm, shuqi, net, localbook  # noqa: E402
+from reader import ali, bc, blxs, core, dq, gsh, kuaikan, mkz, qbxs, qm, shuqi, net, localbook  # noqa: E402
 
 # 统一网络层：证书链兼容、gzip 解压、默认超时、可读错误（对全部书源生效）
 net.install()
@@ -182,6 +182,10 @@ def chapter_key(url, with_bid=False):
         parts = [p for p in str(url).replace(gsh.SCHEME, "").replace(gsh.PREFIX, "").split("/") if p]
         bid = gsh.PREFIX + (parts[0] if parts else "")
         cid = parts[1] if len(parts) > 1 else ""
+    elif kuaikan.is_kk(url):
+        parts = [p for p in str(url).replace(kuaikan.SCHEME, "").replace(kuaikan.PREFIX, "").split("/") if p]
+        bid = kuaikan.PREFIX + (parts[0] if parts else "")
+        cid = parts[1] if len(parts) > 1 else ""
     elif qm.is_qm(url):
         parts = [p for p in url.replace(qm.SCHEME, "").split("/") if p]
         bid = qm.PREFIX + (parts[0] if parts else "")
@@ -248,7 +252,7 @@ def api_chapter(url):
 
 ALL_SOURCES = [("sd", "速读谷"), ("qm", "七猫"), ("sq", "书旗"), ("qb", "全本网"),
                ("bc", "八叉"), ("bl", "八一"), ("dq", "得奇"), ("ali", "爱丽丝"),
-               ("gs", "包子漫画")]
+               ("gs", "包子漫画"), ("kk", "快看漫画")]
 
 
 def disabled_sources():
@@ -325,7 +329,7 @@ def _health_run():
         code = item[0]
         t0 = time.time()
         # 漫画站上没有《斗破苍穹》这种网文，探活得用漫画的常见词
-        kw = "斗罗" if code == "gs" else "斗破苍穹"
+        kw = "斗罗" if code in ("gs", "kk") else "斗破苍穹"
         try:
             r = core.search(kw, code)
             n = len(r.get("books") or [])
@@ -542,7 +546,7 @@ def start_prefetch(bid, start=0, count=8):
     """后台预取后续章节，只补没缓存的；已缓存 / 正在抓取的都会跳过。"""
     if localbook.is_local(bid):
         return {"ok": True, "queued": 0}   # 本地书不用预取
-    if str(bid).startswith(mkz.PREFIX) or str(bid).startswith(gsh.PREFIX):
+    if str(bid).startswith((mkz.PREFIX, gsh.PREFIX, kuaikan.PREFIX)):
         # 漫画每话是图片地址列表，不落缓存；预取只会反复拉 JSON，白费流量
         return {"ok": True, "queued": 0}
     book = cache_get("book_%s" % bid)
@@ -1250,7 +1254,8 @@ def api_comic_page(url):
     host = (parts.netloc or "").lower()
     if parts.scheme not in ("http", "https") or not host:
         raise RuntimeError("图片地址不合法")
-    if not (host.endswith(".6wm.top") or "mkzcdn" in host or "/comic/" in parts.path):
+    if not (host.endswith(".6wm.top") or "mkzcdn" in host
+            or host.endswith(".kkmh.com") or "/comic/" in parts.path):
         raise RuntimeError("图片地址不合法")
     h = hashlib.md5((host + parts.path).encode("utf-8")).hexdigest()[:20]
     for ext in _COMIC_EXT:
@@ -1261,6 +1266,8 @@ def api_comic_page(url):
 
     if host.endswith(".6wm.top"):
         blob, ctype = gsh.page_bytes(str(url))
+    elif host.endswith(".kkmh.com"):
+        blob, ctype = kuaikan.page_bytes(str(url))
     else:
         blob, ctype = mkz.page_bytes(str(url))
     if not blob:
@@ -1282,7 +1289,13 @@ def api_comic_page(url):
 
 def api_comic_open(text):
     """按链接/ID 认出一本在线漫画，顺手返回目录，前端拿到就能直接入架。"""
-    data = gsh.probe(text) if gsh.looks_like(text) else mkz.probe(text)
+    # 三家漫画源按地址特征认领；都不认就按「搜索能用的源优先」依次试
+    for src in (gsh, kuaikan, mkz):
+        if src.looks_like(text):
+            data = src.probe(text)
+            break
+    else:
+        data = mkz.probe(text)
     cache_set("book_%s" % data["id"], data)
     return data
 
