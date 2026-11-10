@@ -170,6 +170,68 @@
     return hit ? hit[0] : '';
   };
 
+  // ---- 自动缓存：加入书架 / 翻页时后台补后续章节，弱网下能连续读 ----
+  const PREFETCH_GATE = new Map();
+  function startPrefetch(bid, from = 0, count = 8) {
+    if (!bid || state.settings.autoPrefetch === false) return;
+    const key = String(bid);
+    const last = PREFETCH_GATE.has(key) ? PREFETCH_GATE.get(key) : -99;
+    if (from > 0 && from - last < 4) return;   // 翻过 4 章再补一次，别每章都发请求
+    PREFETCH_GATE.set(key, from);
+    post('/api/prefetch', { bookId: key, from, count }).catch(() => {});
+  }
+
+  // ---- 一键换源：书名 + 作者匹配其它书源，切换后迁移阅读进度 ----
+  async function openSourceSwitch(b, inReader) {
+    if (!b || !b.id) return;
+    busy(true);
+    let d;
+    try {
+      d = await api(`/api/sources?title=${encodeURIComponent(b.title || '')}` +
+        `&author=${encodeURIComponent(b.author || '')}` +
+        `&exclude=${encodeURIComponent(b.source || '')}`);
+    } catch (e) {
+      toast('查找书源失败：' + e.message);
+      busy(false);
+      return;
+    }
+    busy(false);
+    const off = new Set(state.settings.disabledSources || []);
+    const list = (d.books || []).filter((x) => !off.has(srcCode(x.source)));
+    if (!list.length) { toast('没有找到其它可用的书源'); return; }
+    const anchor = inReader ? $('#r-more') : $('#b-more');
+    if (!anchor) return;
+    if (inReader) $('#r-menu').hidden = true;
+    openPop(anchor, list.slice(0, 9).map((x) => ({
+      label: `换到${SRC_META[x.source]?.[1] || x.source || '其它源'}${x.author ? ' · ' + x.author : ''}`,
+      run: () => doSwitchSource(b, x, inReader),
+    })), `更换书源（当前：${b.source || srcNameById(b.id) || '未知'}）`, 'switch-src');
+  }
+
+  async function doSwitchSource(b, x, inReader) {
+    busy(true);
+    try {
+      const r = await post('/api/switch', { from: b.id, to: x.id });
+      state.shelf = r.shelf || state.shelf;
+      state.progress[x.id] = r.progress;
+      setPrefSrc(x.source || '');
+      bookCache.delete(b.id);
+      bookCache.delete(x.id);
+      startPrefetch(x.id, Math.max(0, (r.index || 0) - 1), 8);
+      toast(`已换到${x.source || '新书源'}，进度保留在第 ${(r.index || 0) + 1} 章`);
+      if (inReader) {
+        closeReader();
+        go(`#/read/${encodeURIComponent(x.id)}`);
+      } else {
+        go(`#/book/${encodeURIComponent(x.id)}`);
+      }
+    } catch (e) {
+      toast('换源失败：' + e.message);
+    } finally {
+      busy(false);
+    }
+  }
+
   // ---------------------------------------------------------------- 网络
   // WKWebView(iOS) 的 fetch 连接被拒 / 复用了后台挂起前的失效连接时，
   // 抛的是 TypeError: Load failed（不是 DOMException AbortError），必须单独识别并重试。
@@ -257,6 +319,7 @@
     };
     const r = await post('/api/shelf', { op: 'add', book: payload });
     state.shelf = r.shelf;
+    startPrefetch(book.id, 0, 5);   // 加入书架就开始缓存前几章
   }
 
   async function removeShelf(id) {
@@ -305,6 +368,7 @@
         <div class="t">${esc(b.title)}</div>
         <div class="s">${sub}</div>
         <div class="m">${meta}</div>
+        <div class="cache-line" data-cache="${esc(b.id)}"></div>
         ${mg ? pickBox(sel) : ''}
       </${tag}>`;
   };
@@ -332,6 +396,7 @@
         <div class="sl-line">${p.t ? `已读：第${readI}章 ${esc(chapterLabel(p.t))}` : '尚未开始阅读'}</div>
         <div class="sl-line">来源：${esc(src)}</div>
         <div class="sl-line sl-last">${ago ? esc(ago) + ' · ' : ''}${p.t ? `第${readI}章 ${esc(chapterLabel(p.t))}` : '暂无更新'}</div>
+        <div class="cache-line" data-cache="${esc(b.id)}"></div>
       </div>
       ${badge}
       ${mg ? pickBox(sel) : ''}
@@ -344,6 +409,23 @@
     state.settings[k] = v;
     saveSettings();
     viewShelf();
+  }
+
+  // 书架卡上的「已缓存到第 X 章」：只读本地磁盘，5 秒内复用结果
+  let cacheInfo = null, cacheInfoAt = 0;
+  function fillCacheLines() {
+    if (!view.querySelector('[data-cache]')) return;
+    const paint = () => {
+      const c = (cacheInfo || {}).cache || {};
+      view.querySelectorAll('[data-cache]').forEach((el) => {
+        const x = c[el.dataset.cache];
+        if (!x || !x.total) return;
+        el.textContent = x.upto ? `已缓存到第 ${x.upto} 章` : `已缓存 ${x.cached}/${x.total} 章`;
+      });
+    };
+    if (cacheInfo && Date.now() - cacheInfoAt < 5000) { paint(); return; }
+    api('/api/cache').then((d) => { cacheInfo = d; cacheInfoAt = Date.now(); paint(); })
+      .catch(() => {});
   }
 
   // 书架管理：三点菜单进入 → 多选 → 批量移出（卡片上不再放单本删除按钮）
@@ -455,6 +537,11 @@
         { label: '最近阅读', on: sort === 'recent', run: () => setShelfPref('shelfSort', 'recent') },
         { label: '按书名', on: sort === 'title', run: () => setShelfPref('shelfSort', 'title') },
         { label: '加入时间', on: sort === 'added', run: () => setShelfPref('shelfSort', 'added') },
+        { label: '后台预取章节', on: state.settings.autoPrefetch !== false, run: () => {
+          state.settings.autoPrefetch = state.settings.autoPrefetch === false;
+          saveSettings();
+          toast(state.settings.autoPrefetch ? '已开启后台预取' : '已关闭后台预取');
+        } },
         { sep: true },
         { label: shelfManage ? '退出管理' : '管理书架', run: () => {
           if (shelfManage) exitShelfManage();
@@ -492,6 +579,8 @@
       });
       $('#mg-done').addEventListener('click', () => { exitShelfManage(); viewShelf(); });
     }
+
+    fillCacheLines();
 
     // 老条目没有章节数：借服务端的目录缓存补一次，补完刷新
     const missing = all.filter((b) => !b.count);
@@ -1051,6 +1140,49 @@
     ['qb', '全本网'], ['bc', '八叉'], ['bl', '八一'], ['dq', '得奇'], ['ali', '爱丽丝']];
   const HIST_KEY = 'sg.search.history';
   const SEARCH_SRC_KEY = 'sg.search.src';
+  const PREF_SRC_KEY = 'sg.pref.src';           // 上次在折叠组里选过的书源
+
+  const srcCode = (name) => (SRC_META[name] || [])[0] || '';
+  const normKey = (s) => String(s == null ? '' : s).toLowerCase()
+    .replace(/[^0-9a-z\u4e00-\u9fff]/g, '');
+  function getPrefSrc() {
+    try { return localStorage.getItem(PREF_SRC_KEY) || ''; } catch (_) { return ''; }
+  }
+  function setPrefSrc(s) {
+    try { localStorage.setItem(PREF_SRC_KEY, s || ''); } catch (_) { /* 忽略 */ }
+  }
+
+  // 八源搜同一本书会冒出多张重复卡片：按「书名 + 作者」归并为一组，
+  // 主卡片优先选书架里已有的 / 上次选过的书源，展开后可直接进其它源。
+  function groupSearchBooks(books) {
+    const map = new Map();
+    books.forEach((b, order) => {
+      const key = normKey(b.title) + '|' + normKey(b.author);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push({ b, order });
+    });
+    const pref = getPrefSrc();
+    return [...map.values()].map((raw) => {
+      // 一个源里可能有多条同名书，折叠列表按源去重，避免出现两个一样的源名
+      const bySrc = new Map();
+      raw.forEach((it) => {
+        const cur = bySrc.get(it.b.source);
+        if (!cur || (state.shelf[it.b.id] && !state.shelf[cur.b.id])) {
+          bySrc.set(it.b.source, it);
+        }
+      });
+      const list = [...bySrc.values()];
+      const score = ({ b, order }) => {
+        let s = 100 - order / 1000;
+        if (state.shelf[b.id]) s += 1000;
+        if (pref && b.source === pref) s += 500;
+        if (b.source === '速读谷') s += 10;
+        return s;
+      };
+      const main = list.reduce((best, cur) => (score(cur) > score(best) ? cur : best), list[0]);
+      return { main, list: list.slice().sort((a, c) => score(c) - score(a)) };
+    });
+  }
 
   function getHist() {
     try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]').filter((x) => typeof x === 'string'); }
@@ -1107,15 +1239,21 @@
     $('#s-clear')?.addEventListener('click', () => go(`#/search?src=${$('#ssrc').value}`));
     $('#s-dots').addEventListener('click', (e) => {
       e.stopPropagation();
-      togglePop(e.currentTarget, 'search-src', SEARCH_SOURCES.map(([k, n]) => ({
-        label: n, on: k === $('#ssrc').value,
-        run: () => {
-          $('#ssrc').value = k;
-          try { localStorage.setItem(SEARCH_SRC_KEY, k); } catch (_) { /* 忽略 */ }
-          const v = $('#sq').value.trim();
-          go(v ? `#/search?src=${k}&q=${encodeURIComponent(v)}` : `#/search?src=${k}`);
-        },
-      })), '选择书源');
+      const off = new Set(state.settings.disabledSources || []);
+      togglePop(e.currentTarget, 'search-src', [
+        ...SEARCH_SOURCES.map(([k, n]) => ({
+          label: (k !== 'all' && off.has(k)) ? `${n}（已关闭）` : n,
+          on: k === $('#ssrc').value,
+          run: () => {
+            $('#ssrc').value = k;
+            try { localStorage.setItem(SEARCH_SRC_KEY, k); } catch (_) { /* 忽略 */ }
+            const v = $('#sq').value.trim();
+            go(v ? `#/search?src=${k}&q=${encodeURIComponent(v)}` : `#/search?src=${k}`);
+          },
+        })),
+        { sep: true },
+        { label: '书源健康与开关', run: () => go('#/mine') },
+      ], '选择书源');
     });
     $('#hist-clear').addEventListener('click', () => {
       setHist([]);
@@ -1151,29 +1289,69 @@
         bindRetry(box);
         return;
       }
-      const cnt = (name) => data.books.filter((b) => b.source === name).length;
+      const off = new Set(state.settings.disabledSources || []);
+      // 同一源里也会重复吐同名书，先按「书名+作者+源」去重，折叠数字才对得上
+      const seenSrc = new Set();
+      const books = data.books.filter((b) => !off.has(srcCode(b.source))).filter((b) => {
+        const k = normKey(b.title) + '|' + normKey(b.author) + '|' + (b.source || '');
+        if (seenSrc.has(k)) return false;
+        seenSrc.add(k);
+        return true;
+      });
+      const groups = groupSearchBooks(books);
+      const cnt = (name) => books.filter((b) => b.source === name).length;
       const mix = [['速读谷', cnt('速读谷')], ['七猫', cnt('七猫')], ['书旗', cnt('书旗')],
         ['全本网', cnt('全本小说网')], ['八叉', cnt('八叉书库')], ['八一', cnt('八一中文网')],
         ['得奇', cnt('得奇小说网')], ['爱丽丝', cnt('爱丽丝书屋')]]
         .filter(([, n]) => n).map(([name, n]) => `${name} ${n} 本`).join(' · ');
+      const merged = books.length - groups.length;
+      const multi = groups.filter((g) => g.list.length > 1).length;
       box.innerHTML = failNote +
-        `<p class="rank-note">共 ${data.books.length} 本${mix ? `（${mix}）` : ''}</p>` +
-        `<div class="list">${data.books.map((b) => `
-        <a class="item" href="#/book/${encodeURIComponent(b.id)}">
-          ${coverBox(b)}
-          <div class="body">
-            <h4>${esc(b.title)}${srcBadge(b.source, true)}</h4>
-            <div class="meta">
-              ${b.author ? `<span>${esc(b.author)}</span>` : ''}
-              ${b.category ? `<span>${esc(b.category)}</span>` : ''}
-              ${b.words ? `<span>${esc(b.words)}</span>` : ''}
-              ${b.srcCount > 1 ? `<span class="tag">${b.srcCount} 个站</span>` : ''}
-              ${b.status ? `<span class="tag">${esc(b.status)}</span>` : ''}
-              ${b.read ? `<span>阅读量 ${esc(b.read)}</span>` : ''}
+        `<p class="rank-note">共 ${books.length} 本${merged > 0 ? ` · 合并后 ${groups.length} 本 · ${multi} 本可换源` : ''}${mix ? `（${mix}）` : ''}</p>` +
+        `<div class="list">${groups.map((g, gi) => {
+          const b = g.main.b;
+          const multi = g.list.length > 1;
+          return `<div class="s-group" data-g="${gi}">
+            <div class="item">
+              <a class="item-main" href="#/book/${encodeURIComponent(b.id)}">
+                ${coverBox(b)}
+                <div class="body">
+                  <h4>${esc(b.title)}${srcBadge(b.source, true)}</h4>
+                  <div class="meta">
+                    ${b.author ? `<span>${esc(b.author)}</span>` : ''}
+                    ${b.category ? `<span>${esc(b.category)}</span>` : ''}
+                    ${b.words ? `<span>${esc(b.words)}</span>` : ''}
+                    ${b.srcCount > 1 ? `<span class="tag">${b.srcCount} 个站</span>` : ''}
+                    ${b.status ? `<span class="tag">${esc(b.status)}</span>` : ''}
+                    ${b.read ? `<span>阅读量 ${esc(b.read)}</span>` : ''}
+                  </div>
+                  <div class="intro">${esc(b.intro || '')}</div>
+                </div>
+              </a>
+              ${multi ? `<button class="src-toggle" data-g="${gi}" title="选择其它书源">
+                <span>${g.list.length} 个书源</span>${ICONS.chev}</button>` : ''}
             </div>
-            <div class="intro">${esc(b.intro || '')}</div>
-          </div>
-        </a>`).join('')}</div>`;
+            ${multi ? `<div class="src-list" id="sg-${gi}" hidden>${g.list.map(({ b: x }) => `
+              <a class="src-opt ${x.id === b.id ? 'on' : ''}" href="#/book/${encodeURIComponent(x.id)}"
+                 data-src="${esc(x.source || '')}">
+                ${srcBadge(x.source, true)}
+                <span class="so-title">${esc(x.title)}</span>
+                <span class="so-meta">${esc(x.author || x.category || '')}</span>
+                ${x.id === b.id ? ICONS.check : ''}
+              </a>`).join('')}</div>` : ''}
+          </div>`;
+        }).join('')}</div>`;
+      box.querySelectorAll('.src-toggle').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const panel = $('#sg-' + btn.dataset.g, box);
+          if (!panel) return;
+          panel.hidden = !panel.hidden;
+          btn.classList.toggle('on', !panel.hidden);
+        });
+      });
+      box.querySelectorAll('.src-opt').forEach((a) => {
+        a.addEventListener('click', () => setPrefSrc(a.dataset.src));
+      });
       bindRetry(box);
     } catch (e) {
       const box = $('#sres');
@@ -1240,6 +1418,7 @@
             <div class="actions">
               <button class="btn" id="b-read">${p && p.i ? `继续阅读 · ${esc(p.t || '')}` : '开始阅读'}</button>
               <button class="btn ghost ${on ? 'on' : ''}" id="b-shelf">${on ? '已在书架' : '加入书架'}</button>
+              <button class="btn ghost ico-only" id="b-more" data-pop title="更多" aria-label="更多">${ICONS.dots}</button>
             </div>
           </div>
         </div>
@@ -1259,6 +1438,11 @@
         </div>
       </div>
     </div>`;
+
+    $('#b-more').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openSourceSwitch(b, false);
+    });
 
     const readBtn = $('#b-read');
     readBtn.addEventListener('click', () => go(`#/read/${b.id}`));
@@ -1409,7 +1593,8 @@
         localStorage.setItem('uiHint', '1');
         setTimeout(() => toast('点屏幕中间呼出菜单，两侧点击翻页'), 900);
       }
-      await loadChapter(i, index == null && p && p.u === R.chapters[i]?.u ? p.ratio : 0);
+        await loadChapter(i, index == null && p && p.u === R.chapters[i]?.u ? p.ratio : 0);
+      startPrefetch(bookId, i, 10);   // 打开就补当前章往后 10 章
     } catch (e) {
       toast('打开失败：' + e.message);
       reader.hidden = true;
@@ -1447,9 +1632,9 @@
       ? Math.round(restoreRatio * (R.pages - 1)) + 1 : 1;
     goToPage(target, { instant: true, noSave: true });
     saveProgress(true);
-    // 预取下一章
-    if (i + 1 < R.chapters.length) {
-      fetch(`/api/chapter?u=${encodeURIComponent(R.chapters[i + 1].u)}`).catch(() => {});
+    // 顺带预取后续章节（后端会跳过已缓存 / 正在抓取的）
+    if (i + 1 < R.chapters.length && R.book) {
+      startPrefetch(R.book.id, i + 1, 8);
     }
   }
 
@@ -1620,6 +1805,11 @@
     go(id ? `#/book/${id}` : '#/shelf');
   });
 
+  $('#r-menu-src').addEventListener('click', () => {
+    $('#r-menu').hidden = true;
+    openSourceSwitch(R.book, true);
+  });
+
   $('#r-menu-dl').addEventListener('click', async () => {
     if (!R.book || dlBtn.disabled) return;
     try {
@@ -1662,6 +1852,7 @@
         };
         await post('/api/shelf', { op: 'add', book: info });
         state.shelf[b.id] = { ...info, added: Date.now() / 1000 };
+        startPrefetch(b.id, 0, 5);
         toast('已加入书架');
       }
       updateShelfBtn();
@@ -1760,20 +1951,76 @@
     if (e.key === '/') { e.preventDefault(); go('#/search'); setTimeout(() => $('#sq')?.focus(), 80); }
   });
 
-  // ---------------------------------------------------------------- 视图：我的（下载内容）
+  // ---------------------------------------------------------------- 视图：我的（书源健康 + 下载）
+  const HEALTH_SOURCES = [['sd', '速读谷'], ['qm', '七猫'], ['sq', '书旗'], ['qb', '全本网'],
+    ['bc', '八叉'], ['bl', '八一'], ['dq', '得奇'], ['ali', '爱丽丝']];
+  let healthTimer = null;
+
+  function loadHealth(refresh = false) {
+    clearTimeout(healthTimer);
+    if (!$('#mine-health')) return;
+    api(`/api/health${refresh ? '?refresh=1' : ''}`).then((d) => {
+      renderHealth(d);
+      if (d.checking && $('#mine-health')) {
+        healthTimer = setTimeout(() => loadHealth(false), 1500);
+      }
+    }).catch(() => {});
+  }
+
+  function renderHealth(d) {
+    const box = $('#mine-health');
+    if (!box) return;
+    const off = new Set(state.settings.disabledSources || []);
+    const rows = HEALTH_SOURCES.map(([code, name]) => {
+      const r = (d.rows || {})[code] || null;
+      const cls = r ? (r.ok ? 'ok' : 'bad') : 'wait';
+      const txt = r ? (r.ok ? '正常' : '异常') : (d.checking ? '检测中' : '未检测');
+      const detail = r ? `${r.ms}ms · ${r.msg}` : '等待检测';
+      return `<div class="health-row">
+        <span class="h-dot ${cls}"></span>
+        <div class="h-name"><b>${esc(name)}</b><span>${esc(detail)}</span></div>
+        <span class="h-state ${cls}">${txt}</span>
+        <button class="h-switch ${off.has(code) ? '' : 'on'}" data-code="${code}"
+          title="启用 / 停用该书源" aria-label="启用或停用该书源"><i></i></button>
+      </div>`;
+    }).join('');
+    const p = d.proxy || {};
+    box.innerHTML = `<div class="health-card">
+      <div class="hc-head">
+        <div><b>书源健康</b><span>${d.checking ? '正在检测 8 个书源…' : '关闭的源不参与搜索与换源'}</span></div>
+        <button class="g-text sm" id="health-refresh" ${d.checking ? 'disabled' : ''}>${d.checking ? '检测中' : '重新检测'}</button>
+      </div>
+      <div class="hc-rows">${rows}</div>
+      <div class="hc-proxy">爱丽丝代理：${esc(p.port ? '本机 ' + p.port : (p.proxy || '直连'))}${p.configured ? '（手动设置）' : ''}${p.cooling ? ' · 直连超时冷却中' : ''}</div>
+    </div>`;
+    box.querySelectorAll('[data-code]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const code = btn.dataset.code;
+        const s = new Set(state.settings.disabledSources || []);
+        if (s.has(code)) s.delete(code); else s.add(code);
+        state.settings.disabledSources = [...s];
+        saveSettings();
+        renderHealth(d);
+      });
+    });
+    $('#health-refresh')?.addEventListener('click', () => loadHealth(true));
+  }
+
   function viewMine() {
     setNav('mine');
     view.innerHTML = `
       <div class="page">
-        <div class="page-head">
+        <div class="page-head glass-head">
           <div>
             <h1 class="h1">我的</h1>
-            <div class="sub">下载到本地的书，离线也能读</div>
+            <div class="sub">离线下载与书源状态</div>
           </div>
         </div>
+        <div id="mine-health"></div>
         <div id="mine-lan"></div>
         <div id="mine-body"><p style="color:var(--muted)">加载中…</p></div>
       </div>`;
+    loadHealth(false);
     Promise.all([api('/api/downloads'), api('/api/lan').catch(() => null)]).then(([{ downloads }, lan]) => {
       // 手机/平板访问提示（局域网模式启动时有效）
       const lanBox = $('#mine-lan');

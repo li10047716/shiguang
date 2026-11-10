@@ -118,6 +118,19 @@ def _cooling():
     return bool(_pick["fail_at"]) and time.time() - _pick["fail_at"] < 20
 
 
+def proxy_info():
+    """给「书源健康」面板看的爱丽丝代理状态。"""
+    cfg = _cfg_proxy()
+    cur = cfg or (_pick["proxy"] if _pick["done"] else "")
+    return {
+        "proxy": cur or "直连",
+        "port": (re.search(r":(\d+)\s*$", cur).group(1) if re.search(r":(\d+)\s*$", cur) else ""),
+        "configured": bool(cfg),
+        "cooling": _cooling(),
+        "candidates": list(_CANDIDATES),
+    }
+
+
 def _get(url, timeout=20, referer=None, retries=1):
     if not _cfg_proxy() and _cooling():
         raise RuntimeError(

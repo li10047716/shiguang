@@ -119,7 +119,8 @@ def api_book(bid, refresh=False):
     return data
 
 
-def api_chapter(url):
+def chapter_key(url, with_bid=False):
+    """章节缓存 key。离线判断和预取都复用它，避免两套算法对不上。"""
     if qm.is_qm(url):
         parts = [p for p in url.replace(qm.SCHEME, "").split("/") if p]
         bid = qm.PREFIX + (parts[0] if parts else "")
@@ -152,7 +153,15 @@ def api_chapter(url):
     else:
         bid = core.book_id(url)
         cid = os.path.basename(urllib.parse.urlsplit(core.normalize(url)).path).replace(".html", "")
-    key = "ch_%s_%s" % (bid, cid)
+    return ("ch_%s_%s" % (bid, cid), bid) if with_bid else "ch_%s_%s" % (bid, cid)
+
+
+def chapter_cached(url):
+    return os.path.isfile(os.path.join(CACHE, _cache_name(chapter_key(url)) + ".json"))
+
+
+def api_chapter(url):
+    key, bid = chapter_key(url, True)
     data = cache_get(key)
     if data:
         return data
@@ -162,6 +171,221 @@ def api_chapter(url):
         data["bookId"] = bid
     cache_set(key, data)
     return data
+
+
+# ------------------------------------------------------------------ 书源 / 换源 / 健康探测 / 章节预取
+
+ALL_SOURCES = [("sd", "速读谷"), ("qm", "七猫"), ("sq", "书旗"), ("qb", "全本网"),
+               ("bc", "八叉"), ("bl", "八一"), ("dq", "得奇"), ("ali", "爱丽丝")]
+
+
+def disabled_sources():
+    """健康面板里被关掉的书源短码。"""
+    try:
+        return set((load_state().get("settings") or {}).get("disabledSources") or [])
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _norm(s):
+    """书名 / 作者归一化：只保留中英文数字，忽略标点、空格、全半角。"""
+    return re.sub(r"[^0-9a-z\u4e00-\u9fff]", "", str(s or "").lower())
+
+
+def search_data(kw, src="all", fresh=False):
+    """搜索缓存。禁用源组合写进 key，开关变化后不会命中旧结果。"""
+    skip = disabled_sources() if src == "all" else set()
+    key = "search_%s_%s_%s" % (src, kw, "-".join(sorted(skip)))
+    data = None if fresh else cache_get(key, ttl=600)
+    if not data:
+        data = core.search(kw, src, skip=skip)
+        if data.get("books"):
+            cache_set(key, data)
+    return data
+
+
+def api_sources(title, author, exclude=""):
+    """换源候选：用书名（+作者）到全部书源里找同一本书。"""
+    data = search_data(title.strip(), "all")
+    t, a = _norm(title), _norm(author)
+    out = {}
+    for b in data.get("books", []):
+        if _norm(b.get("title")) != t:
+            continue
+        ba = _norm(b.get("author"))
+        if a and ba and a != ba:
+            continue
+        src = b.get("source") or ""
+        if not src or src == exclude:
+            continue
+        bid = str(b.get("id") or "")
+        if not bid:
+            continue
+        item = {k: b.get(k) or "" for k in
+                ("id", "title", "author", "cover", "category", "words", "intro", "source")}
+        # 同一源可能返回多条同名书，只留一条（优先带作者的），菜单里不出现重复源
+        cur = out.get(src)
+        if cur is None or (not cur.get("author") and item.get("author")):
+            out[src] = item
+    return {"books": list(out.values()), "msg": data.get("msg") or ""}
+
+
+HEALTH = {"ts": 0.0, "checking": False, "rows": {}}
+_HEALTH_LOCK = threading.Lock()
+
+
+def health_snapshot(refresh=False):
+    now = time.time()
+    with _HEALTH_LOCK:
+        if (refresh or now - HEALTH["ts"] > 300) and not HEALTH["checking"]:
+            HEALTH["checking"] = True
+            threading.Thread(target=_health_run, daemon=True).start()
+        return {"checking": HEALTH["checking"], "rows": dict(HEALTH["rows"]),
+                "ts": HEALTH["ts"], "proxy": ali.proxy_info(),
+                "disabled": sorted(disabled_sources())}
+
+
+def _health_run():
+    """8 源并发探活，用一次真实搜索判断可用性；结果缓存给前端轮询。"""
+    def one(item):
+        code = item[0]
+        t0 = time.time()
+        try:
+            r = core.search("斗破苍穹", code)
+            n = len(r.get("books") or [])
+            row = {"ok": bool(n), "ms": int((time.time() - t0) * 1000),
+                   "msg": ("%d 本" % n) if n else ((r.get("msg") or "没有结果")[:90])}
+        except Exception as e:  # noqa: BLE001
+            row = {"ok": False, "ms": int((time.time() - t0) * 1000),
+                   "msg": str(e)[:90]}
+        return code, row
+
+    try:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            rows = dict(ex.map(one, ALL_SOURCES))
+    except Exception:  # noqa: BLE001
+        rows = {}
+    with _HEALTH_LOCK:
+        HEALTH["rows"] = rows
+        HEALTH["ts"] = time.time()
+        HEALTH["checking"] = False
+
+
+def cache_status():
+    """书架里每本书的章节缓存情况（只读磁盘，不联网）。"""
+    out = {}
+    for bid in (load_state().get("shelf") or {}):
+        book = cache_get("book_%s" % bid) or {}
+        chapters = book.get("chapters") or []
+        keys = [chapter_key(c.get("u") or "") for c in chapters]
+        hit = [os.path.isfile(os.path.join(CACHE, _cache_name(k) + ".json")) for k in keys]
+        upto = 0
+        while upto < len(hit) and hit[upto]:
+            upto += 1
+        out[bid] = {"cached": sum(hit), "upto": upto, "total": len(keys)}
+    return {"cache": out}
+
+
+PREFETCH = {}
+_PF_LOCK = threading.Lock()
+
+
+def start_prefetch(bid, start=0, count=8):
+    """后台预取后续章节，只补没缓存的；已缓存 / 正在抓取的都会跳过。"""
+    book = cache_get("book_%s" % bid)
+    if not book:
+        return {"ok": False, "queued": 0}
+    chapters = book.get("chapters") or []
+    start = max(0, int(start or 0))
+    count = max(1, min(20, int(count or 8)))
+    todo = []
+    for i in range(start, min(len(chapters), start + count)):
+        u = chapters[i].get("u") or ""
+        if not u:
+            continue
+        k = chapter_key(u)
+        if os.path.isfile(os.path.join(CACHE, _cache_name(k) + ".json")):
+            continue
+        todo.append((i, u))
+    with _PF_LOCK:
+        busy = PREFETCH.setdefault(bid, set())
+        todo = [(i, u) for i, u in todo if i not in busy]
+        for i, _ in todo:
+            busy.add(i)
+    if not todo:
+        with _PF_LOCK:
+            if not PREFETCH.get(bid):
+                PREFETCH.pop(bid, None)
+        return {"ok": True, "queued": 0}
+
+    def work():
+        def one(item):
+            try:
+                api_chapter(item[1])
+            except Exception:  # noqa: BLE001
+                pass
+            finally:
+                with _PF_LOCK:
+                    PREFETCH.get(bid, set()).discard(item[0])
+
+        try:
+            with ThreadPoolExecutor(max_workers=3) as ex:
+                list(ex.map(one, todo))
+        finally:
+            with _PF_LOCK:
+                if not PREFETCH.get(bid):
+                    PREFETCH.pop(bid, None)
+
+    threading.Thread(target=work, daemon=True).start()
+    return {"ok": True, "queued": len(todo)}
+
+
+def switch_source(old_id, new_id):
+    """换到另一个书源的同一本书：目录对齐章节 → 迁移进度与书架记录。"""
+    new_book = api_book(new_id)
+    chapters = new_book.get("chapters") or []
+    if not chapters:
+        raise RuntimeError("目标书源没有可用目录")
+
+    def label(t):
+        return re.sub(r"^第[一二三四五六七八九十百千零〇0-9]+章[\s:：·]*", "",
+                      str(t or "")).strip()
+
+    with _LOCK:
+        st = load_state()
+        old = dict(st["progress"].get(old_id) or {})
+    title, want = old.get("t") or "", label(old.get("t"))
+    idx = min(max(int(old.get("i") or 0), 0), len(chapters) - 1)
+    if want:
+        for j, c in enumerate(chapters):
+            if label(c.get("t")) == want or c.get("t") == title:
+                idx = j
+                break
+    ch = chapters[idx]
+    now = time.time()
+    newp = {"u": ch.get("u") or "", "t": ch.get("t") or "", "i": idx,
+            "n": len(chapters), "ratio": old.get("ratio", 0), "ts": now}
+    with _LOCK:
+        st = load_state()
+        st["progress"][new_id] = newp
+        shelf = st["shelf"]
+        prev = shelf.pop(old_id, None)
+        if prev:
+            item = dict(prev)
+            item.update({
+                "id": new_id,
+                "title": new_book.get("title") or prev.get("title") or "",
+                "author": new_book.get("author") or prev.get("author") or "",
+                "cover": new_book.get("cover") or prev.get("cover") or "",
+                "source": new_book.get("source") or "",
+                "count": len(chapters),
+                "progress": newp,
+                "lastRead": now,
+            })
+            shelf[new_id] = item
+        save_state(st)
+        return {"ok": True, "index": idx, "progress": newp, "shelf": st["shelf"],
+                "count": len(chapters), "source": new_book.get("source") or ""}
 
 
 # ------------------------------------------------------------------ 整本下载
@@ -844,15 +1068,15 @@ class Handler(BaseHTTPRequestHandler):
             src = (self._arg("src") or "all").lower()
             if not kw:
                 return self._json({"books": [], "msg": ""})
-            key = "search_%s_%s" % (src, kw)
             # 前端「重新搜索」带 _=时间戳，跳过缓存重新抓所有书源
-            fresh = bool(self._arg("_"))
-            data = None if fresh else cache_get(key, ttl=600)
-            if not data:
-                data = core.search(kw, src)
-                if data.get("books"):
-                    cache_set(key, data)
-            return self._json(data)
+            return self._json(search_data(kw, src, bool(self._arg("_"))))
+        if path == "/api/sources":
+            return self._json(api_sources(self._arg("title"), self._arg("author"),
+                                          self._arg("exclude")))
+        if path == "/api/health":
+            return self._json(health_snapshot(self._arg("refresh") == "1"))
+        if path == "/api/cache":
+            return self._json(cache_status())
         if path == "/api/category":
             return self._json(api_category(self._arg("c", "1"), self._arg("p", "1")))
         if path == "/api/qm/category":
@@ -942,6 +1166,17 @@ class Handler(BaseHTTPRequestHandler):
                 if not bid:
                     return self._err("缺少 bookId")
                 return self._json(start_download(bid))
+            if path == "/api/prefetch":
+                bid = str(body.get("bookId") or "")
+                if not bid:
+                    return self._err("缺少 bookId")
+                return self._json(start_prefetch(bid, body.get("from", 0), body.get("count", 8)))
+            if path == "/api/switch":
+                old = str(body.get("from") or "")
+                new = str(body.get("to") or "")
+                if not old or not new:
+                    return self._err("缺少书籍 id")
+                return self._json(switch_source(old, new))
             if path == "/api/downloads":
                 bid = str(body.get("bookId") or "")
                 with _LOCK:

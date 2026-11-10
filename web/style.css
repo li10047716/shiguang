@@ -1097,3 +1097,91 @@ body {
   .cat-scroll .chip, .rank-row .chip, .cats-panel .chip { padding: 8px 14px; font-size: 12.5px; }
   .toast { bottom: calc(84px + var(--sab)); }
 }
+
+/* ============ 搜索结果去重折叠 ============ */
+.s-group { border-bottom: 1px solid var(--line-2); }
+.item-main {
+  display: flex; gap: 16px; flex: 1; min-width: 0;
+  color: inherit; text-decoration: none;
+}
+.src-toggle {
+  flex: 0 0 auto; align-self: center; display: flex; align-items: center; gap: 4px;
+  border: 1px solid var(--glass-line); background: rgba(255, 255, 255, .76);
+  color: var(--accent-2); border-radius: 999px; padding: 6px 9px 6px 12px;
+  font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  box-shadow: 0 2px 8px rgba(35, 62, 110, .08);
+}
+.src-toggle svg { width: 13px; height: 13px; fill: none; stroke: currentColor;
+  stroke-width: 2; transition: transform .16s; }
+.src-toggle.on svg { transform: rotate(180deg); }
+.src-list {
+  margin: 0 14px 12px 92px; padding: 6px; border-radius: 14px;
+  background: rgba(255, 255, 255, .78); border: 1px solid var(--glass-line);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow);
+}
+.src-opt {
+  display: flex; align-items: center; gap: 8px; padding: 9px 10px;
+  border-radius: 10px; color: var(--ink-2); text-decoration: none; font-size: 12.5px;
+}
+.src-opt:hover, .src-opt.on { background: rgba(120, 150, 220, .14); color: var(--ink); }
+.src-opt .src-dot { margin-left: 0; flex: 0 0 auto; }
+.src-opt .so-title { font-weight: 600; color: var(--ink); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.src-opt .so-meta { color: var(--muted); font-size: 11.5px; margin-left: auto; white-space: nowrap; }
+.src-opt svg { width: 13px; height: 13px; flex: 0 0 auto;
+  fill: none; stroke: var(--accent-2); stroke-width: 2.4; }
+
+/* 书架：已缓存章节提示 */
+.cache-line { font-size: 11px; line-height: 1.4; color: var(--accent-2); margin-top: 4px; }
+.cache-line:empty { display: none; }
+.sl-body .cache-line { margin-top: 3px; }
+
+/* ============ 书源健康面板 ============ */
+.health-card {
+  margin-bottom: 20px; padding: 16px 18px 14px; border-radius: 20px;
+  background: rgba(255, 255, 255, .76); border: 1px solid var(--glass-line);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow);
+}
+.hc-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.hc-head > div { display: flex; flex-direction: column; gap: 2px; }
+.hc-head b { font-size: 14.5px; color: var(--ink); }
+.hc-head span { font-size: 11.5px; color: var(--muted); }
+.hc-rows { display: flex; flex-direction: column; }
+.health-row { display: flex; align-items: center; gap: 10px; padding: 7px 4px;
+  border-bottom: 1px solid rgba(120, 145, 190, .12); }
+.health-row:last-child { border-bottom: 0; }
+.h-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; background: #c6cede; }
+.h-dot.ok { background: #37b26b; box-shadow: 0 0 0 3px rgba(55, 178, 107, .14); }
+.h-dot.bad { background: #e2685c; box-shadow: 0 0 0 3px rgba(226, 104, 92, .13); }
+.h-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.h-name b { font-size: 13px; color: var(--ink); font-weight: 600; }
+.h-name span { font-size: 11px; color: var(--muted); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.h-state { font-size: 11.5px; color: var(--muted); }
+.h-state.ok { color: #2a9d5c; }
+.h-state.bad { color: #d3483a; }
+.h-switch {
+  width: 38px; height: 22px; border-radius: 999px; flex: 0 0 auto; position: relative;
+  border: 1px solid rgba(120, 145, 190, .3); background: rgba(160, 175, 200, .28);
+  transition: background .16s;
+}
+.h-switch i { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+  transition: transform .16s; }
+.h-switch.on { background: var(--accent-2); border-color: transparent; }
+.h-switch.on i { transform: translateX(16px); }
+.hc-proxy { margin-top: 10px; font-size: 11px; color: var(--muted); }
+
+@media (max-width: 640px) {
+  /* 悬浮标签栏是 fixed 的，页面底部要留足空间，别把最后一张卡压住 */
+  body:not(.no-tabbar) .page { padding-bottom: calc(96px + var(--sab)); }
+  .item { gap: 10px; padding: 12px 8px; }
+  .item-main { gap: 11px; }
+  .src-toggle { padding: 5px 8px 5px 9px; font-size: 11px; }
+  .src-list { margin: 0 8px 10px; }
+  .health-card { padding: 14px 12px; border-radius: 18px; }
+  .health-row { gap: 8px; }
+}

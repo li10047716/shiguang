@@ -290,8 +290,9 @@ def ranking(kind="top", page=1):
 
 # ---------------------------------------------------------------- 搜索
 
-def search(keyword, src="all", page=1):
-    """多书源搜索。src: all / sd / qm / sq / qb / bc / bl / dq / ali。"""
+def search(keyword, src="all", page=1, skip=None):
+    """多书源搜索。src: all / sd / qm / sq / qb / bc / bl / dq / ali。
+    skip: 健康面板里关掉的书源短码集合，只在 src=all 时生效。"""
     keyword = (keyword or "").strip()
     if not keyword:
         return {"books": [], "msg": ""}
@@ -299,24 +300,29 @@ def search(keyword, src="all", page=1):
         return {"books": [], "msg": "搜索词至少 2 个汉字"}
 
     src = (src or "all").lower()
+    skip = set(skip or ())
+
+    def want(code):
+        return (src == code) if src != "all" else (code not in skip)
+
     # 各书源并发请求：手机网络下单源最慢 20 秒，串行 8 个源会让前端直接超时。
     # 结果仍按固定顺序合并，保证混排列表稳定；单个源失败不影响其它源。
     jobs = []
-    if src in ("all", "sd"):
+    if want("sd"):
         jobs.append(("速读谷", lambda: _search_sd(keyword), 0))
-    if src in ("all", "qm"):
+    if want("qm"):
         jobs.append(("七猫", lambda: qm.search(keyword, page), 0))
-    if src in ("all", "sq"):
+    if want("sq"):
         jobs.append(("书旗", lambda: shuqi.search(keyword, page), 0))
-    if src in ("all", "qb"):
+    if want("qb"):
         jobs.append(("全本", lambda: qbxs.search(keyword, page), 0))
-    if src in ("all", "bc"):
+    if want("bc"):
         jobs.append(("八叉", lambda: bc.search(keyword, page), 0))
-    if src in ("all", "bl"):
+    if want("bl"):
         jobs.append(("八一", lambda: blxs.search(keyword, page), 20 if src == "all" else 0))
-    if src in ("all", "dq"):
+    if want("dq"):
         jobs.append(("得奇", lambda: dq.search(keyword, page), 20 if src == "all" else 0))
-    if src in ("all", "ali"):
+    if want("ali"):
         jobs.append(("爱丽丝", lambda: ali.search(keyword, page), 0))
 
     books, notes = [], []
