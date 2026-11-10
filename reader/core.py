@@ -14,7 +14,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from html import unescape
 
-from . import ali, bc, blxs, dq, mkz, qbxs, qm, shuqi
+from . import ali, bc, blxs, dq, gsh, mkz, qbxs, qm, shuqi
 
 BASE = "https://www.sudugu.cc"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -291,7 +291,7 @@ def ranking(kind="top", page=1):
 # ---------------------------------------------------------------- 搜索
 
 def search(keyword, src="all", page=1, skip=None):
-    """多书源搜索。src: all / sd / qm / sq / qb / bc / bl / dq / ali。
+    """多书源搜索。src: all / sd / qm / sq / qb / bc / bl / dq / ali / gs。
     skip: 健康面板里关掉的书源短码集合，只在 src=all 时生效。"""
     keyword = (keyword or "").strip()
     if not keyword:
@@ -324,6 +324,9 @@ def search(keyword, src="all", page=1, skip=None):
         jobs.append(("得奇", lambda: dq.search(keyword, page), 20 if src == "all" else 0))
     if want("ali"):
         jobs.append(("爱丽丝", lambda: ali.search(keyword, page), 0))
+    if want("gs"):
+        jobs.append((gsh.SRC_NAME, lambda: gsh.search(keyword, page),
+                     12 if src == "all" else 0))
 
     books, notes = [], []
     if len(jobs) == 1:
@@ -516,6 +519,8 @@ def book(url_or_id):
     v = str(url_or_id or "").strip()
     if mkz.is_mkz(v):
         return mkz.book(v)
+    if gsh.is_gs(v):
+        return gsh.book(v)
     if qm.is_qm(v):
         return qm.book(v)
     if shuqi.is_sq(v):
@@ -601,6 +606,8 @@ def chapter(url):
     """抓取整章：自动跟进 _2/_3 分页。漫画源返回 kind=comic 的图片列表。"""
     if mkz.is_mkz(url):
         return mkz.chapter(url)
+    if gsh.is_gs(url):
+        return gsh.chapter(url)
     if qm.is_qm(url):
         return qm.chapter(url)
     if shuqi.is_sq(url):

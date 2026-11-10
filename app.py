@@ -37,7 +37,7 @@ if sys.platform in ("ios", "android") or os.environ.get("SUDUGU_EMBEDDED"):
     _ca = os.path.join(ROOT, "cacert.pem")
     if os.path.exists(_ca):
         os.environ.setdefault("SSL_CERT_FILE", _ca)
-from reader import ali, bc, blxs, core, dq, mkz, qbxs, qm, shuqi, net, localbook  # noqa: E402
+from reader import ali, bc, blxs, core, dq, gsh, mkz, qbxs, qm, shuqi, net, localbook  # noqa: E402
 
 # 统一网络层：证书链兼容、gzip 解压、默认超时、可读错误（对全部书源生效）
 net.install()
@@ -178,6 +178,10 @@ def chapter_key(url, with_bid=False):
         parts = [p for p in str(url).replace(mkz.SCHEME, "").replace(mkz.PREFIX, "").split("/") if p]
         bid = mkz.PREFIX + (parts[0] if parts else "")
         cid = parts[1] if len(parts) > 1 else ""
+    elif gsh.is_gs(url):
+        parts = [p for p in str(url).replace(gsh.SCHEME, "").replace(gsh.PREFIX, "").split("/") if p]
+        bid = gsh.PREFIX + (parts[0] if parts else "")
+        cid = parts[1] if len(parts) > 1 else ""
     elif qm.is_qm(url):
         parts = [p for p in url.replace(qm.SCHEME, "").split("/") if p]
         bid = qm.PREFIX + (parts[0] if parts else "")
@@ -225,6 +229,9 @@ def api_chapter(url):
     if mkz.is_mkz(url):
         # 漫画每话是一组带签名的图片地址，签名会过期，缓存正文等于缓存一堆死链
         return mkz.chapter(url)
+    if gsh.is_gs(url):
+        # 图片地址本身不过期，但解出来的列表随时可能跟着源调整，同样不落缓存
+        return gsh.chapter(url)
     key, bid = chapter_key(url, True)
     data = cache_get(key)
     if data:
@@ -240,7 +247,8 @@ def api_chapter(url):
 # ------------------------------------------------------------------ 书源 / 换源 / 健康探测 / 章节预取
 
 ALL_SOURCES = [("sd", "速读谷"), ("qm", "七猫"), ("sq", "书旗"), ("qb", "全本网"),
-               ("bc", "八叉"), ("bl", "八一"), ("dq", "得奇"), ("ali", "爱丽丝")]
+               ("bc", "八叉"), ("bl", "八一"), ("dq", "得奇"), ("ali", "爱丽丝"),
+               ("gs", "包子漫画")]
 
 
 def disabled_sources():
@@ -274,6 +282,8 @@ def api_sources(title, author, exclude=""):
     t, a = _norm(title), _norm(author)
     out = {}
     for b in data.get("books", []):
+        if b.get("kind") == "comic":
+            continue   # 换源只在小说之间做，漫画的详情页本来也没有换源入口
         if _norm(b.get("title")) != t:
             continue
         ba = _norm(b.get("author"))
@@ -310,12 +320,14 @@ def health_snapshot(refresh=False):
 
 
 def _health_run():
-    """8 源并发探活，用一次真实搜索判断可用性；结果缓存给前端轮询。"""
+    """各源并发探活，用一次真实搜索判断可用性；结果缓存给前端轮询。"""
     def one(item):
         code = item[0]
         t0 = time.time()
+        # 漫画站上没有《斗破苍穹》这种网文，探活得用漫画的常见词
+        kw = "斗罗" if code == "gs" else "斗破苍穹"
         try:
-            r = core.search("斗破苍穹", code)
+            r = core.search(kw, code)
             n = len(r.get("books") or [])
             row = {"ok": bool(n), "ms": int((time.time() - t0) * 1000),
                    "msg": ("%d 本" % n) if n else ((r.get("msg") or "没有结果")[:90])}
@@ -325,7 +337,7 @@ def _health_run():
         return code, row
 
     try:
-        with ThreadPoolExecutor(max_workers=8) as ex:
+        with ThreadPoolExecutor(max_workers=len(ALL_SOURCES)) as ex:
             rows = dict(ex.map(one, ALL_SOURCES))
     except Exception:  # noqa: BLE001
         rows = {}
@@ -530,8 +542,8 @@ def start_prefetch(bid, start=0, count=8):
     """后台预取后续章节，只补没缓存的；已缓存 / 正在抓取的都会跳过。"""
     if localbook.is_local(bid):
         return {"ok": True, "queued": 0}   # 本地书不用预取
-    if str(bid).startswith(mkz.PREFIX):
-        # 漫画每话是带签名的图片地址列表，不落缓存；预取只会反复拉 JSON，白费流量
+    if str(bid).startswith(mkz.PREFIX) or str(bid).startswith(gsh.PREFIX):
+        # 漫画每话是图片地址列表，不落缓存；预取只会反复拉 JSON，白费流量
         return {"ok": True, "queued": 0}
     book = cache_get("book_%s" % bid)
     if not book:
@@ -1230,20 +1242,27 @@ _COMIC_EXT = (".webp", ".jpg", ".png", ".gif")
 def api_comic_page(url):
     """漫画单页图片：CDN 直连 + 磁盘缓存。
 
-    地址里的 auth_key 每次都变，所以缓存键只取路径 —— 同一张图换了签名照样命中，
-    不会因为签名轮换把缓存全废掉。返回 (bytes, content-type)。
+    这张图可能是漫客栈的（地址里的 auth_key 每次都变），也可能是包子漫画的
+    （地址稳定、但要先解密才拿得到）。所以缓存键取「主机 + 路径」：签名轮换后
+    路径不变仍然命中，不同图床的同名路径也不会串。返回 (bytes, content-type)。
     """
     parts = urllib.parse.urlsplit(str(url or ""))
-    if not parts.netloc or "/comic" not in parts.path:
+    host = (parts.netloc or "").lower()
+    if parts.scheme not in ("http", "https") or not host:
         raise RuntimeError("图片地址不合法")
-    h = hashlib.md5(parts.path.encode("utf-8")).hexdigest()[:20]
+    if not (host.endswith(".6wm.top") or "mkzcdn" in host or "/comic/" in parts.path):
+        raise RuntimeError("图片地址不合法")
+    h = hashlib.md5((host + parts.path).encode("utf-8")).hexdigest()[:20]
     for ext in _COMIC_EXT:
         p = os.path.join(IMG, "comic_%s%s" % (h, ext))
         if os.path.isfile(p) and os.path.getsize(p) > 0:
             with open(p, "rb") as f:
                 return f.read(), MIME.get(ext, "image/jpeg")
 
-    blob, ctype = mkz.page_bytes(str(url))
+    if host.endswith(".6wm.top"):
+        blob, ctype = gsh.page_bytes(str(url))
+    else:
+        blob, ctype = mkz.page_bytes(str(url))
     if not blob:
         raise RuntimeError("图片没有下载下来")
     ctype = (ctype or "").split(";")[0].strip().lower()
@@ -1263,7 +1282,7 @@ def api_comic_page(url):
 
 def api_comic_open(text):
     """按链接/ID 认出一本在线漫画，顺手返回目录，前端拿到就能直接入架。"""
-    data = mkz.probe(text)
+    data = gsh.probe(text) if gsh.looks_like(text) else mkz.probe(text)
     cache_set("book_%s" % data["id"], data)
     return data
 
@@ -1449,6 +1468,8 @@ MIME = {
     ".svg": "image/svg+xml",
     ".png": "image/png",
     ".jpg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
     ".ico": "image/x-icon",
     ".woff2": "font/woff2",
 }

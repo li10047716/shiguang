@@ -66,6 +66,7 @@
     '八一中文网': ['bl', '八一'],
     '得奇小说网': ['dq', '得奇'],
     '爱丽丝书屋': ['ali', '爱丽丝'],
+    '包子漫画': ['gs', '包子'],
     '本地导入': ['loc', '本地'],
   };
   const isLocalBook = (id) => String(id || '').startsWith('loc:');
@@ -516,6 +517,9 @@
     const payload = {
       id: book.id, title: book.title, cover: book.cover,
       author: book.author || '', category: book.category || '', status: book.status || '',
+      // 漫画得把类型和话数一起存下来，书架卡才知道挂「漫画」小标、写「共 N 话」
+      ...(book.kind === 'comic' ? { kind: 'comic', unit: '话' } : {}),
+      ...(book.count ? { count: book.count } : {}),
     };
     const r = await post('/api/shelf', { op: 'add', book: payload });
     state.shelf = r.shelf;
@@ -644,9 +648,9 @@
     </${tag}>`;
   }
 
-  // 在线漫画：站上的搜索 / 分类接口都要登录签名，只能按作品地址添加
+  // 在线漫画：粘作品地址（漫客栈 / 包子漫画都认），不支持关键词搜索入架
   function addOnlineComic() {
-    askInput('粘贴漫画作品链接', 'https://www.mkzhan.com/217087/', async (v) => {
+    askInput('粘贴漫画作品链接', 'https://manhuafree.com/manga/…', async (v) => {
       let b = null;
       try {
         b = await post('/api/comic/open', { url: v });
@@ -1581,7 +1585,8 @@
 
   // ---------------------------------------------------------------- 视图：搜索
   const SEARCH_SOURCES = [['all', '全部书源'], ['sd', '速读谷'], ['qm', '七猫'], ['sq', '书旗'],
-    ['qb', '全本网'], ['bc', '八叉'], ['bl', '八一'], ['dq', '得奇'], ['ali', '爱丽丝']];
+    ['qb', '全本网'], ['bc', '八叉'], ['bl', '八一'], ['dq', '得奇'], ['ali', '爱丽丝'],
+    ['gs', '包子漫画']];
   const HIST_KEY = 'sg.search.history';
   const SEARCH_SRC_KEY = 'sg.search.src';
   const PREF_SRC_KEY = 'sg.pref.src';           // 上次在折叠组里选过的书源
@@ -1601,7 +1606,8 @@
   function groupSearchBooks(books) {
     const map = new Map();
     books.forEach((b, order) => {
-      const key = normKey(b.title) + '|' + normKey(b.author);
+      // 漫画和同名小说不是同一本书，别并到一起让用户「换源」换了个物种
+      const key = normKey(b.title) + '|' + normKey(b.author) + (isComicBook(b) ? '|comic' : '');
       if (!map.has(key)) map.set(key, []);
       map.get(key).push({ b, order });
     });
@@ -1729,7 +1735,7 @@
         <div><button class="btn sm ghost" id="retry-search">重新搜索</button></div>
       </div>` : '';
       if (!data.books.length) {
-        box.innerHTML = `${failNote}<div class="empty"><div class="ic">🔍</div><p>${esc(data.msg ? '请检查网络后重试' : '没有找到相关小说')}</p></div>`;
+        box.innerHTML = `${failNote}<div class="empty"><div class="ic">🔍</div><p>${esc(data.msg ? '请检查网络后重试' : '没有找到相关内容')}</p></div>`;
         bindRetry(box);
         return;
       }
@@ -1746,7 +1752,7 @@
       const cnt = (name) => books.filter((b) => b.source === name).length;
       const mix = [['速读谷', cnt('速读谷')], ['七猫', cnt('七猫')], ['书旗', cnt('书旗')],
         ['全本网', cnt('全本小说网')], ['八叉', cnt('八叉书库')], ['八一', cnt('八一中文网')],
-        ['得奇', cnt('得奇小说网')], ['爱丽丝', cnt('爱丽丝书屋')]]
+        ['得奇', cnt('得奇小说网')], ['爱丽丝', cnt('爱丽丝书屋')], ['包子', cnt('包子漫画')]]
         .filter(([, n]) => n).map(([name, n]) => `${name} ${n} 本`).join(' · ');
       const merged = books.length - groups.length;
       const multi = groups.filter((g) => g.list.length > 1).length;
@@ -3027,7 +3033,7 @@
 
   // ---------------------------------------------------------------- 书源健康面板（我的页底部）
   const HEALTH_SOURCES = [['sd', '速读谷'], ['qm', '七猫'], ['sq', '书旗'], ['qb', '全本网'],
-    ['bc', '八叉'], ['bl', '八一'], ['dq', '得奇'], ['ali', '爱丽丝']];
+    ['bc', '八叉'], ['bl', '八一'], ['dq', '得奇'], ['ali', '爱丽丝'], ['gs', '包子漫画']];
   let healthTimer = null;
 
   function loadHealth(refresh = false) {
