@@ -14,7 +14,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from html import unescape
 
-from . import ali, bc, blxs, daren, dq, gsh, kuaikan, mkz, qbxs, qm, shuqi
+from . import ali, bc, blxs, daren, dq, gsh, kuaikan, manwa, mkz, qbxs, qm, shuqi
 
 BASE = "https://www.sudugu.cc"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -333,6 +333,9 @@ def search(keyword, src="all", page=1, skip=None):
     if want("dr"):
         jobs.append((daren.SRC_NAME, lambda: daren.search(keyword, page),
                      12 if src == "all" else 0))
+    if want("mw"):
+        jobs.append((manwa.SRC_NAME, lambda: manwa.search(keyword, page),
+                     12 if src == "all" else 0))
 
     books, notes = [], []
     if len(jobs) == 1:
@@ -531,6 +534,8 @@ def book(url_or_id):
         return kuaikan.book(v)
     if daren.is_dr(v):
         return daren.book(v)
+    if manwa.is_mw(v):
+        return manwa.book(v)
     if qm.is_qm(v):
         return qm.book(v)
     if shuqi.is_sq(v):
@@ -622,6 +627,8 @@ def chapter(url):
         return kuaikan.chapter(url)
     if daren.is_dr(url):
         return daren.chapter(url)
+    if manwa.is_mw(url):
+        return manwa.chapter(url)
     if qm.is_qm(url):
         return qm.chapter(url)
     if shuqi.is_sq(url):
