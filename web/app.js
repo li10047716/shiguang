@@ -592,9 +592,12 @@
     const meta = `${b.count ? `${b.count} 章 · ` : ''}${esc(b.source || '')}书源`;
     const tag = mg ? 'div' : 'a';
     const attrs = mg ? `data-pick="${esc(b.id)}"` : `href="#/read/${b.id}"`;
+    // 追更检查出新增章节时，在封面右上角标一个 +N（和列表卡的未读角标同一套样式）
+    const upd = b.newCh ? `<span class="unread hot upd">+${b.newCh > 99 ? '99+' : b.newCh}</span>` : '';
     return `
       <${tag} class="card ${mg ? 'manage' : ''} ${sel ? 'picked' : ''}" ${attrs} data-sid="${esc(b.id)}">
         ${coverBox(b, extra)}
+        ${upd}
         <div class="t">${esc(b.title)}</div>
         <div class="s">${sub}</div>
         <div class="m">${meta}</div>
@@ -612,7 +615,7 @@
     const readI = Number.isFinite(p.i) ? p.i + 1 : 0;
     const unread = b.count ? Math.max(0, b.count - readI) : 0;
     const badge = unread
-      ? `<span class="unread ${unread >= 20 ? 'hot' : ''}">${unread > 99 ? '99+' : unread}</span>` : '';
+      ? `<span class="unread ${unread >= 20 || b.newCh ? 'hot' : ''}">${unread > 99 ? '99+' : unread}</span>` : '';
     const src = b.source || srcNameById(b.id) || '速读谷';
     const ago = relTime(b.lastRead);
     const g = bookGroup(b);
@@ -620,6 +623,10 @@
     const extra = `<span class="cv-tag g-${g}">${groupName(g)}</span>`;
     const tag = mg ? 'div' : 'a';
     const attrs = mg ? `data-pick="${esc(b.id)}"` : `href="#/read/${b.id}"`;
+    // 最后一行的位置本来常驻一句「暂无更新」，正好拿来显示检查到的更新，不再多占地方
+    const last = b.newCh
+      ? `更新 +${b.newCh} 章${b.updAt ? ' · ' + esc(relTime(b.updAt)) : ''}`
+      : (p.t ? `第${readI}章 ${esc(chapterLabel(p.t))}` : '暂无更新');
     return `<${tag} class="sl-card ${mg ? 'manage' : ''} ${sel ? 'picked' : ''}" ${attrs} data-sid="${esc(b.id)}">
       ${coverBox(b, extra)}
       <div class="sl-body">
@@ -627,7 +634,7 @@
         <div class="sl-line">${esc(b.author || '佚名')} · 共${b.count ? b.count + '章' : '—章'}</div>
         <div class="sl-line">${p.t ? `已读：第${readI}章 ${esc(chapterLabel(p.t))}` : '尚未开始阅读'}</div>
         <div class="sl-line">来源：${esc(src)}</div>
-        <div class="sl-line sl-last">${ago ? esc(ago) + ' · ' : ''}${p.t ? `第${readI}章 ${esc(chapterLabel(p.t))}` : '暂无更新'}</div>
+        <div class="sl-line sl-last ${b.newCh ? 'has-upd' : ''}">${ago && !b.newCh ? esc(ago) + ' · ' : ''}${last}</div>
         ${tags.length ? `<div class="sl-tags">${tags.slice(0, 4).map((t) => `<span class="sl-tag">#${esc(t)}</span>`).join('')}</div>` : ''}
         <div class="cache-line" data-cache="${esc(b.id)}"></div>
       </div>
@@ -661,7 +668,71 @@
       .catch(() => {});
   }
 
-  // 书架管理：三点菜单进入 → 多选 → 批量移出（卡片上不再放单本删除按钮）
+  // 书架检查更新：后台线程拉目录，前端轮询；有新增就在卡片上留 +N 章，打开这本书后清掉
+  let updPoll = null;
+  function setPullTip(h, text) {
+    const el = $('#pull-tip');
+    if (!el) return;
+    el.style.height = h ? h + 'px' : '0px';
+    el.classList.toggle('on', !!h);
+    const s = el.querySelector('span');
+    if (s && text) s.textContent = text;
+  }
+  async function loadUpdates(refresh = false, notify = false) {
+    clearTimeout(updPoll);
+    if (notify) setPullTip(44, '正在检查更新…');
+    try {
+      const d = await api(`/api/updates${refresh ? '?refresh=1' : ''}`);
+      if (d.shelf) state.shelf = d.shelf;
+      if (d.checking) {
+        updPoll = setTimeout(() => loadUpdates(false, notify), 1000);
+        return;
+      }
+      const books = Object.values(state.shelf).filter((b) => b.newCh);
+      const failed = Object.values(d.items || {}).filter((r) => !r.ok).length;
+      if (notify) {
+        toast(books.length ? `${books.length} 本书有更新`
+          : (failed ? `已检查，${failed} 本读取失败` : '已是最新，没有新章节'));
+      } else if (books.length && !location.hash.startsWith('#/shelf')) {
+        // 启动检查是静默的，人不在书架页时说一声，否则只靠书架副标题提示
+        toast(`${books.length} 本书有更新`);
+      }
+      setPullTip(0);
+      if (location.hash.startsWith('#/shelf')) {
+        const top = view.scrollTop;
+        viewShelf();
+        view.scrollTop = top;
+      }
+    } catch (e) {
+      setPullTip(0);
+      if (notify) toast('检查更新失败：' + e.message);
+    }
+  }
+
+  // 下拉刷新：书架页顶部下拉一格就检查更新（手机上最顺手的入口）
+  let pullStartY = 0, pullH = 0, pulling = false;
+  view.addEventListener('touchstart', (e) => {
+    pulling = false;
+    if (!location.hash.startsWith('#/shelf') || !reader.hidden || shelfManage) return;
+    if (view.scrollTop > 2 || e.touches.length !== 1) return;
+    pullStartY = e.touches[0].clientY;
+    pullH = 0;
+    pulling = true;
+  }, { passive: true });
+  view.addEventListener('touchmove', (e) => {
+    if (!pulling) return;
+    const dy = e.touches[0].clientY - pullStartY;
+    if (dy <= 3) { pullH = 0; setPullTip(0); return; }
+    pullH = Math.min(76, dy * 0.5);
+    setPullTip(pullH, dy > 62 ? '松手检查更新' : '下拉检查更新');
+  }, { passive: true });
+  view.addEventListener('touchend', () => {
+    if (!pulling) return;
+    pulling = false;
+    if (pullH >= 34) { pullH = 0; loadUpdates(true, true); } else { pullH = 0; setPullTip(0); }
+  }, { passive: true });
+
+
   let shelfManage = false;
   const shelfPicked = new Set();
   function exitShelfManage() {
@@ -777,11 +848,15 @@
         <button class="g-text sm" id="mg-done">完成</button>
       </div></div>` : '';
 
-    const baseSub = books.length ? `共 ${books.length} 本 · 阅读进度自动保存`
+    const updN = all.filter((b) => b.newCh).length;
+    // 有更新时副标题只留「共 N 本 · M 本有更新」，手机上才不会折成两行
+    const baseSub = books.length
+      ? (updN ? `共 ${books.length} 本 · ${updN} 本有更新` : `共 ${books.length} 本 · 阅读进度自动保存`)
       : all.length ? `共 ${all.length} 本 · 这一组还没有书` : '收藏的书会出现在这里';
 
     view.innerHTML = `
       <div class="page">
+        <div class="pull-tip" id="pull-tip"><span></span></div>
         <div class="page-head glass-head">
           <div>
             <h1 class="h1">书架</h1>
@@ -845,6 +920,7 @@
           focusShelfSearch = true;
           viewShelf();
         } },
+        { label: '检查更新', run: () => loadUpdates(true, true) },
         { label: '后台预取章节', on: state.settings.autoPrefetch !== false, run: () => {
           state.settings.autoPrefetch = state.settings.autoPrefetch === false;
           saveSettings();
@@ -1861,6 +1937,20 @@
   };
 
   // ---- 分页布局：正文横向分栏，每栏一页 ----
+  // 两种阅读模式：page = 左右分栏翻页（默认）；scroll = 上下连续滚动
+  const isScroll = () => (state.settings.readMode || 'page') === 'scroll';
+  const scrollMax = () => Math.max(0, rEl.scroll.scrollHeight - rEl.scroll.clientHeight);
+  function scrollRatio() {
+    const m = scrollMax();
+    return m > 0 ? Math.min(1, Math.max(0, rEl.scroll.scrollTop / m)) : 1;
+  }
+  function scrollToRatio(r, instant) {
+    const m = scrollMax();
+    if (instant) rEl.scroll.style.scrollBehavior = 'auto';
+    rEl.scroll.scrollTop = Math.min(1, Math.max(0, r || 0)) * m;
+    if (instant) rEl.scroll.style.scrollBehavior = '';
+  }
+
   function layout() {
     const pw = rEl.scroll.clientWidth;
     if (pw <= 0) return;
@@ -1875,14 +1965,29 @@
       : Math.max(40, Math.ceil((pw - rw) / 2));
     const a = rEl.article;
     a.style.width = pw + 'px';
-    a.style.columnWidth = (pw - 2 * M) + 'px';
-    a.style.columnGap = (2 * M) + 'px';
     a.style.padding = (mobile ? 22 + sat : 44) + 'px ' + M + 'px '
                     + (mobile ? 22 + sab : 44) + 'px';
+    if (isScroll()) {
+      // 滚动模式：单栏、不设高度，整个容器原生滚动（CSS 那边还会清掉定位与 transform）
+      a.style.columnWidth = 'auto';
+      a.style.columnGap = '0px';
+      a.style.transform = 'none';
+      R.pages = 1;
+      R.page = 1;
+      return;
+    }
+    a.style.columnWidth = (pw - 2 * M) + 'px';
+    a.style.columnGap = (2 * M) + 'px';
     R.pages = Math.max(1, Math.round(a.scrollWidth / pw));
   }
 
   function goToPage(p, opts = {}) {
+    if (isScroll()) {
+      scrollToRatio(R.pages > 1 ? (p - 1) / (R.pages - 1) : 0, opts.instant);
+      updatePos();
+      if (!opts.noSave) saveProgress();
+      return;
+    }
     R.page = Math.min(R.pages, Math.max(1, p));
     const x = (R.page - 1) * R.pw;
     if (opts.instant) rEl.article.style.transition = 'none';
@@ -1892,11 +1997,18 @@
     if (!opts.noSave) saveProgress();
   }
 
-  // 设置或窗口变化后重排，按原比例恢复页码
-  function relayout() {
+  // 设置或窗口变化后重排，按原比例恢复位置（滚动模式按滚动比例）
+  // keepRatio：切换阅读模式前先记下的位置，切过去要落在同一处
+  function relayout(keepRatio) {
     if (reader.hidden || !R.pw) return;
-    const ratio = R.pages > 1 ? (R.page - 1) / (R.pages - 1) : 0;
+    const ratio = keepRatio != null ? keepRatio
+      : (isScroll() ? scrollRatio() : (R.pages > 1 ? (R.page - 1) / (R.pages - 1) : 0));
     layout();
+    if (isScroll()) {
+      scrollToRatio(ratio, true);
+      updatePos();
+      return;
+    }
     goToPage(Math.round(ratio * (R.pages - 1)) + 1, { instant: true, noSave: true });
   }
 
@@ -1926,19 +2038,25 @@
     if (s.lh) reader.style.setProperty('--r-lh', s.lh);
     if (s.w) reader.style.setProperty('--r-width', s.w + 'px');
     reader.dataset.rtheme = s.theme || 'paper';
+    reader.dataset.mode = isScroll() ? 'scroll' : 'page';
     rEl.article.dataset.font = s.font || 'serif';
     $('#fs-val').textContent = s.fs || 19;
     $('#set-lh').value = Math.round((s.lh || 1.95) * 100);
     $('#set-w').value = s.w || 720;
     document.querySelectorAll('#set-font button').forEach((b) => b.classList.toggle('on', (s.font || 'serif') === b.dataset.font));
     document.querySelectorAll('#set-theme button').forEach((b) => b.classList.toggle('on', (s.theme || 'paper') === b.dataset.theme));
+    document.querySelectorAll('#set-mode button').forEach((b) => b.classList.toggle('on', (s.readMode || 'page') === b.dataset.mode));
   }
 
   function setSetting(k, v) {
+    // 翻页模式切换前先记下当前读到哪儿，换一种排版也停在同一个位置
+    const before = isScroll() ? scrollRatio() : (R.pages > 1 ? (R.page - 1) / (R.pages - 1) : 0);
+    const modeSwitch = k === 'readMode';
     state.settings[k] = v;
     applySettings();
     saveSettings();
-    relayout(); // 字号/行距/页宽变化后重新分页
+    relayout(modeSwitch ? before : undefined);
+    if (modeSwitch) saveProgress();
   }
 
   // 阅读计时：只在阅读器可见且页面在前台时累加，用于「我的」里的阅读统计
@@ -1976,6 +2094,12 @@
       }
         await loadChapter(i, index == null && p && p.u === R.chapters[i]?.u ? p.ratio : 0);
       startClock();
+      // 打开这本书就算看过更新了，顺手清掉书架上的 +N 章
+      if (state.shelf[bookId] && state.shelf[bookId].newCh) {
+        delete state.shelf[bookId].newCh;
+        delete state.shelf[bookId].updAt;
+        post('/api/shelf', { op: 'seen', book: { id: bookId } }).catch(() => {});
+      }
       startPrefetch(bookId, i, 10);   // 打开就补当前章往后 10 章
     } catch (e) {
       toast('打开失败：' + e.message);
@@ -2012,9 +2136,14 @@
     rEl.article.appendChild(rEl.end);
     applyHighlights();
     layout();
-    const target = restoreRatio > 0 && R.pages > 1
-      ? Math.round(restoreRatio * (R.pages - 1)) + 1 : 1;
-    goToPage(target, { instant: true, noSave: true });
+    if (isScroll()) {
+      scrollToRatio(restoreRatio > 0 ? restoreRatio : 0, true);
+      updatePos();
+    } else {
+      const target = restoreRatio > 0 && R.pages > 1
+        ? Math.round(restoreRatio * (R.pages - 1)) + 1 : 1;
+      goToPage(target, { instant: true, noSave: true });
+    }
     saveProgress(true);
     // 顺带预取后续章节（后端会跳过已缓存 / 正在抓取的）
     if (i + 1 < R.chapters.length && R.book) {
@@ -2157,6 +2286,13 @@
     // 左下角：全书进度百分比
     const pct = Math.round(((i + 1) / Math.max(1, n)) * 100);
     rEl.pct.textContent = `${pct}%`;
+    if (isScroll()) {
+      // 滚动模式没有页码，右下滑杆显示本章已读比例
+      const r = scrollRatio();
+      rEl.page.textContent = `${Math.round(r * 100)}%`;
+      if (document.activeElement !== rEl.slider) rEl.slider.value = Math.round(r * 1000);
+      return;
+    }
     // 右下角：本章真实页码
     rEl.page.textContent = `${R.page} / ${R.pages}`;
     // 同步翻页滑杆（拖动中不覆盖）
@@ -2165,13 +2301,15 @@
     }
   }
 
-  // 滑杆拖动 → 翻到对应页
+  // 滑杆拖动 → 翻到对应页（滚动模式下按比例滚）
   rEl.slider.addEventListener('input', () => {
+    if (isScroll()) { scrollToRatio(Number(rEl.slider.value) / 1000); updatePos(); return; }
     const p = R.pages > 1 ? Math.round((Number(rEl.slider.value) / 1000) * (R.pages - 1)) + 1 : 1;
     goToPage(p);
   });
 
   function currentRatio() {
+    if (isScroll()) return scrollRatio();
     return R.pages > 1 ? (R.page - 1) / (R.pages - 1) : 1;
   }
 
@@ -2186,6 +2324,7 @@
         bookId: R.book.id, u: R.chapter.url || R.chapters[R.index]?.u,
         t: R.chapter.title || R.chapters[R.index]?.t, i: R.index,
         n: R.chapters.length, ratio: currentRatio(), sec, chNew,
+        title: R.book.title || '',
       };
       state.progress[R.book.id] = { ...payload, ts: Date.now() / 1000 };
       if (state.shelf[R.book.id]) {
@@ -2219,16 +2358,28 @@
     if (show) {
       renderToc('');
       const on = rEl.toc.querySelector('a.on');
-      if (on) on.scrollIntoView({ block: 'center' });
-      $('#toc-filter').focus();
+      if (on) {
+        // 抽屉刚从 hidden 变出来时还没有布局，直接 scrollIntoView 会滚不动，等一帧再按偏移算
+        requestAnimationFrame(() => {
+          rEl.toc.scrollTop = Math.max(0,
+            on.offsetTop - rEl.toc.clientHeight / 2 + on.offsetHeight / 2);
+        });
+      }
+      // 手机上别自动聚焦：会弹出键盘把目录遮掉
+      if (!window.matchMedia('(max-width: 640px)').matches) $('#toc-filter').focus();
     }
   }
 
   function renderToc(filter) {
     const kw = (filter || '').trim();
-    const list = R.chapters.map((c, i) => ({ c, i }))
-      .filter(({ c }) => !kw || c.t.includes(kw))
-      .slice(0, 2000);
+    let list = R.chapters.map((c, i) => ({ c, i }));
+    if (kw) {
+      list = list.filter(({ c }) => c.t.includes(kw)).slice(0, 2000);
+    } else if (list.length > 1600) {
+      // 几千章的书全渲染太慢，以当前章为中心取一段，保证「打开就在当前章」总成立
+      const from = Math.max(0, Math.min(R.index - 700, list.length - 1600));
+      list = list.slice(from, from + 1600);
+    }
     rEl.toc.innerHTML = list.map(({ c, i }) => `
       <a href="javascript:void(0)" data-i="${i}" class="${i === R.index ? 'on' : ''}">
         <span>${esc(c.t)}</span></a>`).join('') || '<p style="padding:12px;color:var(--r-sub)">没有匹配的章节</p>';
@@ -2420,12 +2571,14 @@
   });
 
   // 点正文：左 1/3 上一页，右 1/3 下一页，中间呼出/收起控制面板
+  // 滚动模式下位置没有意义，点哪儿都是呼出/收起
   let swiped = false;
   rEl.scroll.addEventListener('click', (e) => {
     if (swiped) { swiped = false; return; }  // 滑动翻页后浏览器还会补一次 click，别重复翻
     if (e.target.closest('button, a, input')) return;
     const sel = window.getSelection ? String(window.getSelection()) : '';
     if (sel.trim()) return; // 正在划词选中，不打断
+    if (isScroll()) { toggleUI(); return; }
     const rect = rEl.scroll.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     if (x < 0.3) prevPage();
@@ -2433,9 +2586,10 @@
     else toggleUI();
   });
 
-  // 滚轮翻页
+  // 滚轮翻页（滚动模式交给原生滚动）
   let wheelLock = 0;
   rEl.scroll.addEventListener('wheel', (e) => {
+    if (isScroll()) return;
     e.preventDefault();
     const now = Date.now();
     if (now - wheelLock < 260) return;
@@ -2445,12 +2599,20 @@
     if (d > 0) nextPage(); else prevPage();
   }, { passive: false });
 
-  // 触屏左右滑动翻页
+  // 滚动模式：滚动时更新进度与滑杆，进度按 1.2 秒防抖落盘
+  rEl.scroll.addEventListener('scroll', () => {
+    if (!isScroll() || reader.hidden) return;
+    updatePos();
+    saveProgress();
+  }, { passive: true });
+
+  // 触屏左右滑动翻页（滚动模式是原生上下滚，不接管）
   let tX = 0, tY = 0;
   rEl.scroll.addEventListener('touchstart', (e) => {
     tX = e.touches[0].clientX; tY = e.touches[0].clientY;
   }, { passive: true });
   rEl.scroll.addEventListener('touchend', (e) => {
+    if (isScroll()) return;
     const dx = e.changedTouches[0].clientX - tX;
     const dy = e.changedTouches[0].clientY - tY;
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
@@ -2480,6 +2642,9 @@
   document.querySelectorAll('#set-font button').forEach((b) => {
     b.addEventListener('click', () => setSetting('font', b.dataset.font));
   });
+  document.querySelectorAll('#set-mode button').forEach((b) => {
+    b.addEventListener('click', () => setSetting('readMode', b.dataset.mode));
+  });
   document.querySelectorAll('#set-theme button').forEach((b) => {
     b.addEventListener('click', () => setSetting('theme', b.dataset.theme));
   });
@@ -2499,8 +2664,8 @@
       }
       if (e.key === 'ArrowLeft') { e.preventDefault(); prevPage(); }
       else if (e.key === 'ArrowRight') { e.preventDefault(); nextPage(); }
-      else if (e.key === 'PageUp') { e.preventDefault(); prevPage(); }
-      else if (e.key === 'PageDown') { e.preventDefault(); nextPage(); }
+      else if (e.key === 'PageUp') { if (!isScroll()) { e.preventDefault(); prevPage(); } }
+      else if (e.key === 'PageDown') { if (!isScroll()) { e.preventDefault(); nextPage(); } }
       else if (e.key.toLowerCase() === 't') { e.preventDefault(); toggleToc(); }
       return;
     }
@@ -2578,8 +2743,7 @@
     return p.length === 3 ? `${Number(p[1])}/${Number(p[2])}` : String(d || '');
   };
 
-  function renderStats(s) {
-    const box = $('#mine-stats');
+  function renderStats(s) {    const box = $('#mine-stats');
     if (!box) return;
     const recent = s.recent || [];
     const max = Math.max(60, ...recent.map((x) => x.sec || 0));
@@ -2598,6 +2762,120 @@
       </div>
       <div class="sc-bars">${bars}</div>
     </div>`;
+  }
+
+  const fmtSize = (n) => {
+    const b = Math.max(0, Number(n) || 0);
+    if (b < 1024) return b + ' B';
+    if (b < 1024 * 1024) return Math.round(b / 1024) + ' KB';
+    if (b < 1024 * 1024 * 1024) return (b / 1024 / 1024).toFixed(1) + ' MB';
+    return (b / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+  };
+
+  // 继续阅读：最近打开过的书，没加入书架的也在里面
+  function renderHistory(box, list) {
+    if (!box) return;
+    if (!list.length) {
+      box.innerHTML = `<div class="mine-card glass-card">
+        <div class="mc-head"><b>继续阅读</b></div>
+        <p class="mc-empty">读过的书按时间排在这里，没加入书架也能找回来</p>
+      </div>`;
+      return;
+    }
+    box.innerHTML = `<div class="mine-card glass-card">
+      <div class="mc-head"><b>继续阅读</b>
+        <button class="mc-more" id="hist-wipe">清空</button></div>
+      ${list.slice(0, 6).map((h) => `<div class="mk-row" data-hist-go="${esc(h.bookId)}|${Number(h.i) || 0}">
+        <div class="mk-main">
+          <div class="mk-title">${esc(h.title || '未知书名')}</div>
+          <div class="mk-sub">${esc(h.t || '')}${h.ts ? ' · ' + esc(relTime(h.ts)) : ''}</div>
+        </div>
+        <button class="mk-go" data-hist-read="${esc(h.bookId)}|${Number(h.i) || 0}">继续</button>
+        <button class="mk-del" data-hist-del="${esc(h.bookId)}" title="从历史里移除">${ICONS.close}</button>
+      </div>`).join('')}
+    </div>`;
+    const jump = (v) => {
+      const [bid, i] = String(v).split('|');
+      go(`#/read/${encodeURIComponent(bid)}/${Number(i) || 0}`);
+    };
+    box.querySelectorAll('[data-hist-go]').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('[data-hist-del]')) return;
+        jump(el.dataset.histGo);
+      });
+    });
+    box.querySelectorAll('[data-hist-read]').forEach((b) => {
+      b.addEventListener('click', () => jump(b.dataset.histRead));
+    });
+    box.querySelectorAll('[data-hist-del]').forEach((b) => {
+      b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        try {
+          const r = await post('/api/history', { op: 'remove', bookId: b.dataset.histDel });
+          renderHistory(box, r.history || []);
+        } catch (err) { toast('删除失败'); }
+      });
+    });
+    $('#hist-wipe')?.addEventListener('click', () => {
+      askConfirm('清空阅读历史？书架、进度和书签都不受影响。', '清空', async () => {
+        try {
+          await post('/api/history', { op: 'clear' });
+          renderHistory(box, []);
+          toast('阅读历史已清空');
+        } catch (err) { toast('清空失败'); }
+      });
+    });
+  }
+
+  // 缓存管理：看得见占多少地方，能按本清、也能一次清空
+  function loadCacheCard() {
+    const box = $('#mine-cache');
+    if (!box) return;
+    api('/api/cache').then((d) => renderCache(box, d)).catch(() => {});
+  }
+
+  function renderCache(box, d) {
+    const rows = Object.entries(d.cache || {})
+      .filter(([, v]) => v.cached && !v.local)
+      .sort((a, b) => (b[1].bytes || 0) - (a[1].bytes || 0));
+    box.innerHTML = `<div class="mine-card glass-card">
+      <div class="mc-head"><b>缓存</b>
+        <span class="mc-sub">章节 ${fmtSize(d.bytes)} · 封面 ${fmtSize(d.img)}</span></div>
+      ${rows.length ? rows.slice(0, 8).map(([bid, v]) => `<div class="mk-row">
+        <div class="mk-main">
+          <div class="mk-title">${esc(v.title || (state.shelf[bid] || {}).title || bid)}</div>
+          <div class="mk-sub">已缓存 ${v.cached}${v.total ? '/' + v.total : ''} 章 · ${fmtSize(v.bytes)}</div>
+        </div>
+        <button class="mk-go" data-cache-clear="${esc(bid)}">清理</button>
+      </div>`).join('')
+        : '<p class="mc-empty">还没有章节缓存，预取或「下载本书」之后会出现在这里</p>'}
+      <div class="mc-foot">
+        <button class="g-text sm danger" id="cache-wipe" ${rows.length ? '' : 'disabled'}>清空全部章节缓存</button>
+      </div>
+    </div>`;
+    const refresh = (msg) => {
+      cacheInfo = null;
+      cacheInfoAt = 0;
+      if (msg) toast(msg);
+      loadCacheCard();
+    };
+    box.querySelectorAll('[data-cache-clear]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        try {
+          const r = await post('/api/cache', { bookId: b.dataset.cacheClear });
+          refresh(`已清理 ${r.removed || 0} 章`);
+        } catch (e) { toast('清理失败：' + (e && e.message || e)); }
+      });
+    });
+    $('#cache-wipe')?.addEventListener('click', () => {
+      askConfirm('清空全部章节缓存？书架、阅读进度和书签都不受影响，只是下次读要重新下载正文。',
+        '清空缓存', async () => {
+          try {
+            const r = await post('/api/cache', {});
+            refresh(`已清理 ${r.removed || 0} 章`);
+          } catch (e) { toast('清理失败：' + (e && e.message || e)); }
+        });
+    });
   }
 
   const markRow = (m) => `
@@ -2730,6 +3008,7 @@
           </div>
         </div>
         <div id="mine-stats"></div>
+        <div id="mine-history"></div>
         <div class="mine-actions glass-pill">
           <button class="g-text" id="mine-import">导入本地书</button>
           <i class="g-sep"></i>
@@ -2747,6 +3026,7 @@
         <div id="mine-marks"></div>
         <div id="mine-local"></div>
         <div id="mine-downloads"></div>
+        <div id="mine-cache"></div>
         <div id="mine-lan"></div>
         <div id="mine-health"></div>
       </div>`;
@@ -2759,7 +3039,9 @@
     applyTheme();   // 页面重建后补一次选中态
 
     api('/api/stats').then(renderStats).catch(() => {});
+    api('/api/history').then((d) => renderHistory($('#mine-history'), d.history || [])).catch(() => {});
     renderMarks($('#mine-marks'), 5);
+    loadCacheCard();
     loadHealth(false);
     Promise.all([
       api('/api/local/list').catch(() => ({ books: [] })),
@@ -2858,5 +3140,7 @@
     if (!location.hash) location.hash = '#/shelf';
     render();
     setInterval(() => fetch('/api/ping').catch(() => {}), 20000);
+    // 启动后静默检查一次追更（10 分钟内查过就直接复用结果，不会每次拉目录）
+    setTimeout(() => { loadUpdates(false, false); }, 1200);
   })();
 })();

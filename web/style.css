@@ -423,9 +423,12 @@ a { color: inherit; text-decoration: none; }
 }
 .r-corner.left { left: 16px; }
 .r-corner.right { right: 16px; }
-/* 目录抽屉打开时，返回按钮与左下角百分比让位隐藏 */
+/* 目录抽屉打开时，返回按钮、右上角两个按钮与左下角百分比让位隐藏
+   —— 它们会压住抽屉的关闭按钮，点 × 反而会点到「移出书架」 */
 .r-corner { transition: opacity .2s ease; }
 .reader.toc-open .r-back,
+.reader.toc-open .r-shelf,
+.reader.toc-open .r-more,
 .reader.toc-open .r-corner.left { opacity: 0; pointer-events: none; }
 
 /* 返回按钮：左上角独立悬浮，随沉浸模式一起隐藏 */
@@ -1513,3 +1516,50 @@ html[data-theme="dark"] .toast { background: rgba(30, 38, 50, .96); color: #eef3
   }
   html[data-theme="dark"] .g-text.on { background: rgba(110, 162, 255, .22); }
 }
+
+/* ============ 追更：书架下拉刷新 + 更新标记 ============ */
+.pull-tip {
+  height: 0; overflow: hidden; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; color: var(--muted); opacity: 0;
+  transition: height .16s ease, opacity .16s ease;
+}
+.pull-tip.on { opacity: 1; }
+.sl-last.has-upd { color: var(--accent-2); font-weight: 600; }
+/* 网格模式没有未读角标，用同一套角标样式在封面右上角标 +N 章 */
+.card .unread.upd {
+  z-index: 2; right: 8px; top: 8px; min-width: 0; height: 20px; padding: 0 6px;
+  font-size: 11px; background: #f26a5a; color: #fff;
+  box-shadow: 0 3px 10px rgba(242, 106, 90, .32);
+}
+
+/* ============ 阅读器：上下滚动模式 ============ */
+.reader[data-mode="scroll"] .r-scroll {
+  overflow-y: auto; overflow-x: hidden;
+  -webkit-overflow-scrolling: touch; touch-action: pan-y;
+}
+.reader[data-mode="scroll"] .r-article {
+  position: static; height: auto; width: 100% !important;
+  column-width: auto !important; column-gap: 0 !important;
+  transform: none !important; transition: none; will-change: auto;
+  margin: 0 auto;
+}
+.reader[data-mode="scroll"] .r-end { margin-bottom: 44px; }
+
+/* 缓存卡片底部：清空全部 */
+.mc-foot {
+  display: flex; justify-content: flex-end;
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid rgba(120, 145, 190, .12);
+}
+
+html[data-theme="dark"] .mc-foot { border-top-color: rgba(255, 255, 255, .07); }
+html[data-theme="dark"] .mk-del:hover { background: rgba(226, 104, 92, .18); color: #ff8b7d; }
+
+/* 「我的」卡片右上角的小按钮（清空历史等）：button 和 a 共用同一套外观 */
+.mc-more {
+  border: 0; background: none; cursor: pointer; padding: 2px 4px;
+  font-family: inherit; font-size: 12px; color: var(--accent-2);
+  border-radius: 6px;
+}
+.mc-more:hover { background: var(--accent-soft); }
+.pull-tip { color: var(--ink-2); }

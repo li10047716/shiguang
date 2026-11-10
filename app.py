@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import urllib.parse
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
@@ -48,19 +49,45 @@ PING_SEEN = [False]
 
 # ------------------------------------------------------------------ 缓存 / 状态
 
+def _diag(msg):
+    """state.json 读写异常时留一行现场，出问题能查，正常时不产生文件。"""
+    try:
+        with open(os.path.join(DATA, "diag.log"), "a", encoding="utf-8") as f:
+            f.write("%s %s\n" % (time.strftime("%m-%d %H:%M:%S"), msg))
+    except OSError:
+        pass
+
+
 def _read_json(path, default=None):
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception:  # noqa: BLE001
+    except FileNotFoundError:
+        return default
+    except Exception as e:  # noqa: BLE001
+        _diag("read fail %s: %r" % (os.path.basename(path), e))
         return default
 
 
 def _write_json(path, obj):
-    tmp = path + ".tmp"
+    # tmp 名带上线程 id：两个线程同时写同一个文件时不会互相踩。
+    # 之前固定用 path + ".tmp"，并发下会把目标文件替换成半截内容（书架会突然变空）
+    tmp = "%s.%d.tmp" % (path, threading.get_ident())
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False)
-    os.replace(tmp, path)
+    for i in range(6):
+        try:
+            os.replace(tmp, path)
+            return
+        except OSError as e:  # noqa: BLE001
+            _diag("replace fail %s: %r" % (os.path.basename(path), e))
+            if i >= 5:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                raise
+            time.sleep(0.02)
 
 
 def _cache_name(key):
@@ -84,7 +111,18 @@ def cache_set(key, data):
 
 
 def load_state():
-    st = _read_json(STATE_FILE, {}) or {}
+    # 后台线程在写 state 时，读端偶尔会碰上 replace 的瞬间；读失败重试一次，
+    # 免得把空书架当成真的写回去（那会丢进度）
+    st = None
+    for _ in range(3):
+        st = _read_json(STATE_FILE, None)
+        if isinstance(st, dict) and st:
+            break
+        if st is not None:
+            break
+        time.sleep(0.04)
+    if not isinstance(st, dict):
+        st = {}
     st.setdefault("shelf", {})
     st.setdefault("progress", {})
     st.setdefault("settings", {})
@@ -94,7 +132,18 @@ def load_state():
     return st
 
 
+_LAST_SHELF = [None]
+
+
 def save_state(st):
+    # 书架从「有书」变成「空」才留现场（用户主动删光也是这个特征，但很少见）；
+    # 正常的增删单本不记，免得日志越滚越大
+    keys = sorted((st.get("shelf") or {}).keys())
+    if keys != _LAST_SHELF[0]:
+        if _LAST_SHELF[0] and not keys:
+            stack = " < ".join(f.name for f in traceback.extract_stack(limit=5)[:-1])
+            _diag("shelf cleared by %s (progress=%d)" % (stack, len(st.get("progress") or {})))
+        _LAST_SHELF[0] = keys
     _write_json(STATE_FILE, st)
 
 
@@ -279,26 +328,191 @@ def _health_run():
         HEALTH["checking"] = False
 
 
+def _file_size(path):
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+def _dir_size(d, exts=None):
+    total = 0
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return 0
+    for name in names:
+        if exts and os.path.splitext(name)[1].lower() not in exts:
+            continue
+        total += _file_size(os.path.join(d, name))
+    return total
+
+
 def cache_status():
     """书架里每本书的章节缓存情况（只读磁盘，不联网）。"""
     out = {}
-    for bid in (load_state().get("shelf") or {}):
+    shelf = load_state().get("shelf") or {}
+    for bid in shelf:
         if localbook.is_local(bid):
             try:
-                n = len(localbook.book(bid).get("chapters") or [])
+                b = localbook.book(bid)
+                n = len(b.get("chapters") or [])
+                title = b.get("title") or bid
             except Exception:  # noqa: BLE001
                 n = 0
-            out[bid] = {"cached": n, "upto": n, "total": n}
+                title = (shelf.get(bid) or {}).get("title") or bid
+            out[bid] = {"cached": n, "upto": n, "total": n, "bytes": 0, "local": True,
+                        "title": title}
             continue
         book = cache_get("book_%s" % bid) or {}
         chapters = book.get("chapters") or []
         keys = [chapter_key(c.get("u") or "") for c in chapters]
-        hit = [os.path.isfile(os.path.join(CACHE, _cache_name(k) + ".json")) for k in keys]
+        paths = [os.path.join(CACHE, _cache_name(k) + ".json") for k in keys]
+        hit = [os.path.isfile(p) for p in paths]
         upto = 0
         while upto < len(hit) and hit[upto]:
             upto += 1
-        out[bid] = {"cached": sum(hit), "upto": upto, "total": len(keys)}
-    return {"cache": out}
+        out[bid] = {"cached": sum(hit), "upto": upto, "total": len(keys),
+                    "bytes": sum(_file_size(p) for p, h in zip(paths, hit) if h),
+                    "title": (shelf.get(bid) or {}).get("title") or book.get("title") or bid}
+    return {"cache": out, "bytes": _dir_size(CACHE, {".json"}),
+            "img": _dir_size(IMG), "local": _dir_size(os.path.join(DATA, "local"))}
+
+
+def clear_cache(bid=None):
+    """清理章节缓存。bid 为空时清空全部；目录缓存保留，书架的数字和目录都还在。"""
+    removed = 0
+    freed = 0
+    if bid:
+        book = cache_get("book_%s" % bid) or {}
+        paths = [os.path.join(CACHE, _cache_name(chapter_key(c.get("u") or "")) + ".json")
+                 for c in (book.get("chapters") or [])]
+    else:
+        try:
+            paths = [os.path.join(CACHE, n) for n in os.listdir(CACHE) if n.endswith(".json")]
+        except OSError:
+            paths = []
+    for p in paths:
+        size = _file_size(p)
+        try:
+            os.remove(p)
+            removed += 1
+            freed += size
+        except OSError:
+            pass
+    return {"ok": True, "removed": removed, "freed": freed}
+
+
+# ------------------------------------------------------------------ 追更：书架检查更新
+
+UPDATES = {"at": 0.0, "busy": False, "items": {}}
+_UP_LOCK = threading.Lock()
+
+
+def _latest_count(bid):
+    """书架追更用的最新章节数：目录缓存 15 分钟内直接用，过期重新抓一次。"""
+    book = cache_get("book_%s" % bid, ttl=900)
+    if not book or not (book.get("chapters") or []):
+        book = api_book(bid, refresh=True)
+    return len(book.get("chapters") or [])
+
+
+def updates_snapshot(refresh=False):
+    """书架检查更新。检查在后台线程跑，前端轮询 checking，列表不用干等。"""
+    now = time.time()
+    with _UP_LOCK:
+        due = refresh or (now - UPDATES["at"] > 600)
+        if due and not UPDATES["busy"]:
+            shelf = load_state().get("shelf") or {}
+            if any(not localbook.is_local(b) for b in shelf):
+                UPDATES["busy"] = True
+                threading.Thread(target=_updates_run, daemon=True).start()
+        return {"checking": UPDATES["busy"], "items": dict(UPDATES["items"]),
+                "at": UPDATES["at"], "shelf": load_state().get("shelf") or {}}
+
+
+def _updates_run():
+    """并发拉 4 本，只看章节数变化；有新增就记 newCh，等用户打开这本书再清掉。"""
+    targets = [(bid, b) for bid, b in (load_state().get("shelf") or {}).items()
+               if not localbook.is_local(bid)]
+
+    def one(item):
+        bid, b = item
+        old = int(b.get("count") or 0)
+        try:
+            n = _latest_count(bid)
+            if not n:
+                return bid, {"ok": False, "msg": "目录为空", "count": old}
+            return bid, {"ok": True, "count": n, "added": max(0, n - old) if old else 0}
+        except Exception as e:  # noqa: BLE001
+            return bid, {"ok": False, "msg": str(e)[:80], "count": old}
+
+    items = {}
+    if targets:
+        try:
+            with ThreadPoolExecutor(max_workers=4) as ex:
+                for bid, row in ex.map(one, targets):
+                    items[bid] = row
+        except Exception:  # noqa: BLE001
+            items = {}
+    with _LOCK:
+        st = load_state()
+        for bid, row in items.items():
+            cur = st["shelf"].get(bid)
+            if cur is None or not row.get("ok"):
+                continue
+            n = row.get("count") or 0
+            if n and n != int(cur.get("count") or 0):
+                cur["count"] = n
+            if row.get("added"):
+                cur["newCh"] = int(row["added"])
+                cur["updAt"] = time.time()
+        save_state(st)
+    with _UP_LOCK:
+        UPDATES["items"] = items
+        UPDATES["at"] = time.time()
+        UPDATES["busy"] = False
+
+
+def history_snapshot():
+    """阅读历史：补上书名，history 里只有 bookId，书可能已经不在书架了。"""
+    st = load_state()
+    shelf = st.get("shelf") or {}
+    prog = st.get("progress") or {}
+    out = []
+    for h in (st.get("history") or []):
+        bid = str(h.get("bookId") or "")
+        if not bid:
+            continue
+        title = h.get("title") or (shelf.get(bid) or {}).get("title") or ""
+        if not title:
+            # 旧版本写的历史没有书名，借目录缓存补一下，别在列表里露一串书号
+            title = str((cache_get("book_%s" % bid) or {}).get("title") or "")
+        if localbook.is_local(bid):
+            # 本地书删掉以后 history 里还会留一条，别再列出来
+            try:
+                title = title or str(localbook.book(bid).get("title") or "")
+            except Exception:  # noqa: BLE001
+                continue
+        item = {"bookId": bid, "title": title, "u": h.get("u") or "",
+                "t": h.get("t") or "", "i": (prog.get(bid) or {}).get("i", 0),
+                "ts": h.get("ts") or 0}
+        out.append(item)
+    return {"history": out[:40]}
+
+
+def history_update(body):
+    op = body.get("op")
+    with _LOCK:
+        st = load_state()
+        hist = st.get("history") or []
+        if op == "clear":
+            st["history"] = []
+        elif op == "remove":
+            bid = str(body.get("bookId") or "")
+            st["history"] = [h for h in hist if str(h.get("bookId") or "") != bid]
+        save_state(st)
+    return {"ok": True, "history": history_snapshot()["history"]}
 
 
 PREFETCH = {}
@@ -1267,6 +1481,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(health_snapshot(self._arg("refresh") == "1"))
         if path == "/api/cache":
             return self._json(cache_status())
+        if path == "/api/updates":
+            return self._json(updates_snapshot(self._arg("refresh") == "1"))
+        if path == "/api/history":
+            return self._json(history_snapshot())
         if path == "/api/category":
             return self._json(api_category(self._arg("c", "1"), self._arg("p", "1")))
         if path == "/api/qm/category":
@@ -1375,6 +1593,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(api_local_delete(bid))
             if path == "/api/mark":
                 return self._json(api_mark(body))
+            if path == "/api/cache":
+                return self._json(clear_cache(str(body.get("bookId") or "") or None))
+            if path == "/api/history":
+                return self._json(history_update(body))
             if path == "/api/restore":
                 return self._json(restore_data(body.get("data"), body.get("mode") or "merge"))
             if path == "/api/shelf":
@@ -1426,10 +1648,17 @@ class Handler(BaseHTTPRequestHandler):
                 cur.setdefault("added", time.time())
                 st["shelf"][bid] = cur
             elif op == "remove" and bid:
+                _diag("shelf remove %r" % bid)
                 st["shelf"].pop(bid, None)
             elif op == "touch" and bid:
                 if bid in st["shelf"]:
                     st["shelf"][bid]["lastRead"] = time.time()
+            elif op == "seen" and bid:
+                # 打开这本书就算「看过更新了」，清掉书架的 +N 章标记
+                cur = st["shelf"].get(bid)
+                if cur is not None:
+                    cur.pop("newCh", None)
+                    cur.pop("updAt", None)
             elif op == "meta" and bid:
                 # 分组 / 标签：允许显式清空（group="" 或 tags=[]），
                 # 不能用 add 那两个空值过滤，否则「取消分组」会失效
@@ -1475,7 +1704,8 @@ class Handler(BaseHTTPRequestHandler):
                 shelf["progress"] = item
                 shelf["lastRead"] = item["ts"]
             hist = [h for h in st["history"] if h.get("bookId") != bid]
-            hist.insert(0, {"bookId": bid, "u": item["u"], "t": item["t"], "ts": item["ts"]})
+            hist.insert(0, {"bookId": bid, "u": item["u"], "t": item["t"], "ts": item["ts"],
+                            "title": body.get("title") or (shelf or {}).get("title") or ""})
             st["history"] = hist[:60]
 
             # 阅读统计：前端每隔一段时间带上这段时间读了多少秒
