@@ -592,16 +592,12 @@
     const meta = `${b.count ? `${b.count} 章 · ` : ''}${esc(b.source || '')}书源`;
     const tag = mg ? 'div' : 'a';
     const attrs = mg ? `data-pick="${esc(b.id)}"` : `href="#/read/${b.id}"`;
-    // 追更检查出新增章节时，在封面右上角标一个 +N（和列表卡的未读角标同一套样式）
-    const upd = b.newCh ? `<span class="unread hot upd">+${b.newCh > 99 ? '99+' : b.newCh}</span>` : '';
     return `
       <${tag} class="card ${mg ? 'manage' : ''} ${sel ? 'picked' : ''}" ${attrs} data-sid="${esc(b.id)}">
         ${coverBox(b, extra)}
-        ${upd}
         <div class="t">${esc(b.title)}</div>
         <div class="s">${sub}</div>
         <div class="m">${meta}</div>
-        <div class="cache-line" data-cache="${esc(b.id)}"></div>
         ${mg ? pickBox(sel) : ''}
       </${tag}>`;
   };
@@ -617,16 +613,11 @@
     const badge = unread
       ? `<span class="unread ${unread >= 20 || b.newCh ? 'hot' : ''}">${unread > 99 ? '99+' : unread}</span>` : '';
     const src = b.source || srcNameById(b.id) || '速读谷';
-    const ago = relTime(b.lastRead);
     const g = bookGroup(b);
     const tags = bookTags(b);
     const extra = `<span class="cv-tag g-${g}">${groupName(g)}</span>`;
     const tag = mg ? 'div' : 'a';
     const attrs = mg ? `data-pick="${esc(b.id)}"` : `href="#/read/${b.id}"`;
-    // 最后一行的位置本来常驻一句「暂无更新」，正好拿来显示检查到的更新，不再多占地方
-    const last = b.newCh
-      ? `更新 +${b.newCh} 章${b.updAt ? ' · ' + esc(relTime(b.updAt)) : ''}`
-      : (p.t ? `第${readI}章 ${esc(chapterLabel(p.t))}` : '暂无更新');
     return `<${tag} class="sl-card ${mg ? 'manage' : ''} ${sel ? 'picked' : ''}" ${attrs} data-sid="${esc(b.id)}">
       ${coverBox(b, extra)}
       <div class="sl-body">
@@ -634,9 +625,7 @@
         <div class="sl-line">${esc(b.author || '佚名')} · 共${b.count ? b.count + '章' : '—章'}</div>
         <div class="sl-line">${p.t ? `已读：第${readI}章 ${esc(chapterLabel(p.t))}` : '尚未开始阅读'}</div>
         <div class="sl-line">来源：${esc(src)}</div>
-        <div class="sl-line sl-last ${b.newCh ? 'has-upd' : ''}">${ago && !b.newCh ? esc(ago) + ' · ' : ''}${last}</div>
         ${tags.length ? `<div class="sl-tags">${tags.slice(0, 4).map((t) => `<span class="sl-tag">#${esc(t)}</span>`).join('')}</div>` : ''}
-        <div class="cache-line" data-cache="${esc(b.id)}"></div>
       </div>
       ${badge}
       ${mg ? pickBox(sel) : ''}
@@ -651,24 +640,7 @@
     viewShelf();
   }
 
-  // 书架卡上的「已缓存到第 X 章」：只读本地磁盘，5 秒内复用结果
-  let cacheInfo = null, cacheInfoAt = 0;
-  function fillCacheLines() {
-    if (!view.querySelector('[data-cache]')) return;
-    const paint = () => {
-      const c = (cacheInfo || {}).cache || {};
-      view.querySelectorAll('[data-cache]').forEach((el) => {
-        const x = c[el.dataset.cache];
-        if (!x || !x.total) return;
-        el.textContent = x.upto ? `已缓存到第 ${x.upto} 章` : `已缓存 ${x.cached}/${x.total} 章`;
-      });
-    };
-    if (cacheInfo && Date.now() - cacheInfoAt < 5000) { paint(); return; }
-    api('/api/cache').then((d) => { cacheInfo = d; cacheInfoAt = Date.now(); paint(); })
-      .catch(() => {});
-  }
-
-  // 书架检查更新：后台线程拉目录，前端轮询；有新增就在卡片上留 +N 章，打开这本书后清掉
+  // 书架检查更新：后台线程拉目录，前端轮询；有新增就让未读数变红，打开这本书后清掉
   let updPoll = null;
   function setPullTip(h, text) {
     const el = $('#pull-tip');
@@ -996,8 +968,6 @@
       });
       $('#mg-done').addEventListener('click', () => { exitShelfManage(); viewShelf(); });
     }
-
-    fillCacheLines();
 
     // 老条目没有章节数：借服务端的目录缓存补一次，补完刷新
     const missing = all.filter((b) => !b.count);
@@ -2854,8 +2824,6 @@
       </div>
     </div>`;
     const refresh = (msg) => {
-      cacheInfo = null;
-      cacheInfoAt = 0;
       if (msg) toast(msg);
       loadCacheCard();
     };

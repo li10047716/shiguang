@@ -945,7 +945,6 @@ body {
 .sl-body { flex: 1; min-width: 0; padding-right: 28px; display: flex; flex-direction: column; gap: 2px; }
 .sl-title { font-size: 15.5px; font-weight: 700; color: var(--ink); margin: 2px 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sl-line { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sl-last { color: var(--muted); }
 .unread {
   position: absolute; right: 12px; top: 12px; min-width: 24px; height: 24px; padding: 0 7px;
   border-radius: 999px; background: rgba(120, 140, 170, .28); color: #586274;
@@ -1137,9 +1136,6 @@ body {
   fill: none; stroke: var(--accent-2); stroke-width: 2.4; }
 
 /* 书架：已缓存章节提示 */
-.cache-line { font-size: 11px; line-height: 1.4; color: var(--accent-2); margin-top: 4px; }
-.cache-line:empty { display: none; }
-.sl-body .cache-line { margin-top: 3px; }
 
 /* ============ 书源健康面板 ============ */
 .health-card {
@@ -1524,13 +1520,6 @@ html[data-theme="dark"] .toast { background: rgba(30, 38, 50, .96); color: #eef3
   transition: height .16s ease, opacity .16s ease;
 }
 .pull-tip.on { opacity: 1; }
-.sl-last.has-upd { color: var(--accent-2); font-weight: 600; }
-/* 网格模式没有未读角标，用同一套角标样式在封面右上角标 +N 章 */
-.card .unread.upd {
-  z-index: 2; right: 8px; top: 8px; min-width: 0; height: 20px; padding: 0 6px;
-  font-size: 11px; background: #f26a5a; color: #fff;
-  box-shadow: 0 3px 10px rgba(242, 106, 90, .32);
-}
 
 /* ============ 阅读器：上下滚动模式 ============ */
 .reader[data-mode="scroll"] .r-scroll {
