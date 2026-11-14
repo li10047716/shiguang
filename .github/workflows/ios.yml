@@ -30,6 +30,9 @@ on:
 jobs:
   build-ios:
     runs-on: macos-14
+    # secrets 上下文不能直接在 if 里用，先经 job env 暴露（env 里引用 secrets 合法）
+    env:
+      IOS_SIGN: ${{ secrets.IOS_SIGN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -45,7 +48,7 @@ jobs:
 
       # ---------- 签名模式 ----------
       - name: Import signing certificate
-        if: secrets.IOS_SIGN == 'true'
+        if: env.IOS_SIGN == 'true'
         run: |
           echo "${{ secrets.IOS_CERT_P12_BASE64 }}" | base64 -d > /tmp/cert.p12
           security create-keychain -p "${{ secrets.IOS_KEYCHAIN_PASSWORD }}" build.keychain
@@ -55,13 +58,13 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "${{ secrets.IOS_KEYCHAIN_PASSWORD }}" build.keychain
 
       - name: Install provisioning profile
-        if: secrets.IOS_SIGN == 'true'
+        if: env.IOS_SIGN == 'true'
         run: |
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           echo "${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}" | base64 -d > "$HOME/Library/MobileDevice/Provisioning Profiles/profile.mobileprovision"
 
       - name: Write export options
-        if: secrets.IOS_SIGN == 'true'
+        if: env.IOS_SIGN == 'true'
         run: |
           cat > ExportOptions.plist <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
@@ -73,12 +76,12 @@ jobs:
           PLIST
 
       - name: Build signed IPA
-        if: secrets.IOS_SIGN == 'true'
+        if: env.IOS_SIGN == 'true'
         run: flutter build ipa --release --export-options-plist=ExportOptions.plist
 
       # ---------- 无签名模式（编译验证） ----------
       - name: Build unsigned (compile check)
-        if: secrets.IOS_SIGN != 'true'
+        if: env.IOS_SIGN != 'true'
         run: flutter build ios --release --no-codesign
 
       - name: Upload artifact
