@@ -1,0 +1,91 @@
+# iOS IPA 构建（GitHub Actions，macOS runner）
+#
+# 两种模式，由 secrets.IOS_SIGN 决定：
+#   - IOS_SIGN != 'true'（默认）：`flutter build ios --no-codesign`，
+#     只做编译验证，产出 .app（不产出 .ipa——无签名时 Apple 不允许打 ipa）。
+#     用于确认 iOS 依赖/代码能编过。
+#   - IOS_SIGN == 'true'：导入证书 + 描述文件，`flutter build ipa` 产出可分发 .ipa。
+#
+# 签名所需的 GitHub Actions secrets（Settings → Secrets and variables → Actions）：
+#   IOS_SIGN                 'true'
+#   IOS_TEAM_ID              Apple Developer Team ID（如 ABCD1234）
+#   IOS_CERT_P12_BASE64      iOS 分发/开发证书 .p12 的 base64（证书+私钥，导出时含私钥）
+#   IOS_CERT_PASSWORD        .p12 密码
+#   IOS_PROVISION_PROFILE_BASE64  .mobileprovision 描述文件的 base64
+#   IOS_EXPORT_METHOD        app-store / ad-hoc / development（默认 ad-hoc）
+#   IOS_KEYCHAIN_PASSWORD    构建用临时 keychain 密码（随意设一个强密码）
+name: iOS IPA Build
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'lib/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.9'
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      # ---------- 签名模式 ----------
+      - name: Import signing certificate
+        if: secrets.IOS_SIGN == 'true'
+        run: |
+          echo "${{ secrets.IOS_CERT_P12_BASE64 }}" | base64 -d > /tmp/cert.p12
+          security create-keychain -p "${{ secrets.IOS_KEYCHAIN_PASSWORD }}" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "${{ secrets.IOS_KEYCHAIN_PASSWORD }}" build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "${{ secrets.IOS_CERT_PASSWORD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "${{ secrets.IOS_KEYCHAIN_PASSWORD }}" build.keychain
+
+      - name: Install provisioning profile
+        if: secrets.IOS_SIGN == 'true'
+        run: |
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}" | base64 -d > "$HOME/Library/MobileDevice/Provisioning Profiles/profile.mobileprovision"
+
+      - name: Write export options
+        if: secrets.IOS_SIGN == 'true'
+        run: |
+          cat > ExportOptions.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>${{ secrets.IOS_EXPORT_METHOD || 'ad-hoc' }}</string>
+            <key>teamID</key><string>${{ secrets.IOS_TEAM_ID }}</string>
+          </dict></plist>
+          PLIST
+
+      - name: Build signed IPA
+        if: secrets.IOS_SIGN == 'true'
+        run: flutter build ipa --release --export-options-plist=ExportOptions.plist
+
+      # ---------- 无签名模式（编译验证） ----------
+      - name: Build unsigned (compile check)
+        if: secrets.IOS_SIGN != 'true'
+        run: flutter build ios --release --no-codesign
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build
+          path: |
+            build/ios/ipa/*.ipa
+            build/ios/iphoneos/*.app
+          if-no-files-found: warn
