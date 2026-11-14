@@ -29,7 +29,7 @@ on:
 
 jobs:
   build-ios:
-    runs-on: macos-14
+    runs-on: macos-13
     # secrets 上下文不能直接在 if 里用，先经 job env 暴露（env 里引用 secrets 合法）
     env:
       IOS_SIGN: ${{ secrets.IOS_SIGN }}
