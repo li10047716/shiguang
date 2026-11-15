@@ -287,51 +287,32 @@ class _SearchPageState extends State<SearchPage> {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final kw in _history)
-                          InputChip(
-                            label: Text(kw,
-                                style: const TextStyle(fontSize: 12)),
-                            onPressed: () {
-                              _controller.text = kw;
-                              _go();
-                            },
-                            onDeleted: () => _removeHistory(kw),
-                            deleteIcon:
-                                const Icon(Icons.close, size: 14),
-                            backgroundColor:
-                                Colors.white.withValues(alpha: 0.9),
-                            side: BorderSide.none,
-                          ),
-                      ],
-                    ),
-                  ] else
-                    Glass(
-                      radius: 14,
-                      blur: 0,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 16),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
+                    // 左对齐（外层 Column 默认居中，Align 撑满后靠左）
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
                         children: [
-                          const Icon(Icons.search,
-                              size: 40, color: Colors.grey),
-                          const SizedBox(height: 10),
-                          const Text('输入关键词开始聚合搜索',
-                              style: TextStyle(color: Colors.grey)),
-                          const SizedBox(height: 6),
-                          Text(
-                            '会同时搜索所选书源，\n再按「书名 + 作者」聚合结果',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                                color: Colors.grey.shade500, fontSize: 12),
-                          ),
+                          for (final kw in _history)
+                            InputChip(
+                              label: Text(kw,
+                                  style: const TextStyle(fontSize: 12)),
+                              onPressed: () {
+                                _controller.text = kw;
+                                _go();
+                              },
+                              onDeleted: () => _removeHistory(kw),
+                              deleteIcon:
+                                  const Icon(Icons.close, size: 14),
+                              backgroundColor:
+                                  Colors.white.withValues(alpha: 0.9),
+                              side: BorderSide.none,
+                            ),
                         ],
                       ),
                     ),
+                  ],
                 ],
               ),
             ),

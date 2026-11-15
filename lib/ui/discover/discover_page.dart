@@ -65,10 +65,9 @@ class _DiscoverPageState extends State<DiscoverPage>
   void initState() {
     super.initState();
     _scrollCtrl.addListener(_onScroll);
-    _sources = SourceRegistry()
-        .enabled
-        .where((s) => s.discoverTabs.isNotEmpty)
-        .toList();
+    // 监听书源启停变化：关闭书源后发现页跟着不显示
+    SourceRegistry().addListener(_onSourcesChanged);
+    _refreshSources();
     if (_sources.isNotEmpty) {
       _source = _sources.first;
       _initSection();
@@ -78,9 +77,35 @@ class _DiscoverPageState extends State<DiscoverPage>
 
   @override
   void dispose() {
+    SourceRegistry().removeListener(_onSourcesChanged);
     _scrollCtrl.dispose();
     _closeSourceMenu();
     super.dispose();
+  }
+
+  /// 重新读取启用中的书源（过滤有发现 tab 的）
+  void _refreshSources() {
+    _sources = SourceRegistry()
+        .enabled
+        .where((s) => s.discoverTabs.isNotEmpty)
+        .toList();
+  }
+
+  /// 书源启停变化：刷新源列表；若当前源被禁用则切到第一个可用源。
+  void _onSourcesChanged() {
+    if (!mounted) return;
+    _refreshSources();
+    if (_source != null && !_sources.contains(_source)) {
+      if (_sources.isEmpty) {
+        setState(() => _source = null);
+      } else {
+        setState(() => _source = _sources.first);
+        _initSection();
+        _load(reset: true);
+      }
+    } else {
+      setState(() {});
+    }
   }
 
   // 滚动到底部附近 → 自动加载下一页

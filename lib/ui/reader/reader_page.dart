@@ -5,6 +5,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
@@ -61,14 +62,11 @@ class _ReaderPageState extends State<ReaderPage>
   bool _autoNight = true; // 夜间自动切换（21:00-7:00）
   bool _indent = true; // 段首缩进
   bool _justify = false; // 两端对齐
-  int _wallpaper = 0; // 背景壁纸（0 = 无）
+  int _wallpaper = 0; // 背景壁纸（0 = 无，>0 = 内置渐变索引）
+  String _wallpaperImg = ''; // 本地导入的壁纸图片路径（空 = 无）
   double _pagePadH = 20; // 正文左右页边距（可调）
-  // 点击区域动作：0 上一页 / 1 下一页 / 2 呼出菜单 / 3 目录 / 4 无
-  int _tapLeft = 0; // 点左 1/3
-  int _tapMiddle = 2; // 点中间
-  int _tapRight = 1; // 点右 1/3
+  double _pagePadV = 24; // 正文上下页边距（可调）
   bool _immersive = false; // 沉浸阅读（隐藏状态栏）
-  int _animMs = 220; // 翻页动画时长（毫秒）
 
   // 覆盖翻页动画
   late final AnimationController _coverAnim;
@@ -122,6 +120,13 @@ class _ReaderPageState extends State<ReaderPage>
   /// 目录面板：常驻树内缓存（打开只滑入，不重建列表 → 秒开）
   bool _tocOpen = false;
   final ScrollController _tocController = ScrollController();
+  // 目录面板状态：tab（0 目录/1 书签/2 笔记）、排序、过滤、书签/笔记列表
+  int _tocTab = 0;
+  bool _tocReverse = false;
+  String _tocFilter = '';
+  final TextEditingController _tocSearchCtrl = TextEditingController();
+  List<Bookmark> _tocBookmarks = const [];
+  List<HighlightNote> _tocNotes = const [];
 
   /// 当前可用的章节列表（优先用动态 provider）
   List<Chapter> get _list => widget.chaptersProvider?.call() ?? widget.chapters;
@@ -131,7 +136,7 @@ class _ReaderPageState extends State<ReaderPage>
     super.initState();
     _index = widget.initialIndex;
     _coverAnim = AnimationController(
-        vsync: this, duration: Duration(milliseconds: _animMs));
+        vsync: this, duration: const Duration(milliseconds: 240));
     _loadSettings();
     _loadChapter(_index);
   }
@@ -142,6 +147,7 @@ class _ReaderPageState extends State<ReaderPage>
     _bgPlayer.dispose();
     _pageController.dispose();
     _tocController.dispose();
+    _tocSearchCtrl.dispose();
     _coverAnim.dispose();
     _tick(); // 结算阅读时长
     // 退出阅读器：恢复系统状态栏显示
@@ -177,19 +183,16 @@ class _ReaderPageState extends State<ReaderPage>
       _indent = sp.getBool('reader_indent') ?? true;
       _justify = sp.getBool('reader_justify') ?? false;
       _wallpaper = sp.getInt('reader_wallpaper') ?? 0;
+      _wallpaperImg = sp.getString('reader_wallpaper_img') ?? '';
       _pagePadH = sp.getDouble('reader_page_pad') ?? 20;
-      _tapLeft = sp.getInt('reader_tap_left') ?? 0;
-      _tapMiddle = sp.getInt('reader_tap_middle') ?? 2;
-      _tapRight = sp.getInt('reader_tap_right') ?? 1;
+      _pagePadV = sp.getDouble('reader_page_pad_v') ?? 24;
       _immersive = sp.getBool('reader_immersive') ?? false;
-      _animMs = sp.getInt('reader_anim_ms') ?? 220;
     });
     if (_bgSound) _startBgSound();
     // 沉浸阅读：隐藏系统状态栏
     if (_immersive) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     }
-    _coverAnim.duration = Duration(milliseconds: _animMs);
   }
 
   Future<void> _startBgSound() async {
@@ -323,49 +326,6 @@ class _ReaderPageState extends State<ReaderPage>
   void _next() => _loadChapter(_index + 1);
   void _prev() => _loadChapter(_index - 1);
 
-  /// 点击区域动作下拉行：左/中/右 1/3 各自配置动作。
-  Widget _tapZoneRow(String label, int current, String key,
-      void Function(void Function()) setSheet) {
-    return Row(
-      children: [
-        Text(label),
-        const Spacer(),
-        DropdownButton<int>(
-          value: current,
-          isDense: true,
-          items: const [
-            DropdownMenuItem(value: 0, child: Text('上一页')),
-            DropdownMenuItem(value: 1, child: Text('下一页')),
-            DropdownMenuItem(value: 2, child: Text('呼出菜单')),
-            DropdownMenuItem(value: 3, child: Text('目录')),
-            DropdownMenuItem(value: 4, child: Text('无')),
-          ],
-          onChanged: (v) async {
-            if (v == null) return;
-            void apply() {
-              switch (key) {
-                case 'reader_tap_left':
-                  _tapLeft = v;
-                  break;
-                case 'reader_tap_middle':
-                  _tapMiddle = v;
-                  break;
-                case 'reader_tap_right':
-                  _tapRight = v;
-                  break;
-              }
-            }
-
-            setState(apply);
-            setSheet(apply);
-            final sp = await SharedPreferences.getInstance();
-            await sp.setInt(key, v);
-          },
-        ),
-      ],
-    );
-  }
-
   Future<void> _showSettings() async {
     await showModalBottomSheet(
       context: context,
@@ -403,150 +363,9 @@ class _ReaderPageState extends State<ReaderPage>
                       ),
                     ],
                   ),
-                  // 书签当前章
-                ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    _bookmarked ? Icons.bookmark : Icons.bookmark_border,
-                    color: _bookmarked ? const Color(0xFFE5A13A) : null,
-                  ),
-                  title: Text(_bookmarked ? '取消当前章书签' : '加当前章书签'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _toggleBookmark();
-                  },
-                ),
                 const SizedBox(height: 12),
-                // 背景（8 主题）
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Padding(
-                        padding: EdgeInsets.only(top: 8), child: Text('背景')),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (var i = 0; i < _bgOptions.length; i++)
-                            GestureDetector(
-                              onTap: () async {
-                                setState(() => _bg = _bgOptions[i]);
-                                setSheet(() => _bg = _bgOptions[i]);
-                                final sp =
-                                    await SharedPreferences.getInstance();
-                                await sp.setInt('reader_bg', i);
-                              },
-                              child: Container(
-                                width: 36,
-                                height: 26,
-                                decoration: BoxDecoration(
-                                  color: _bgOptions[i],
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                    color: _bg == _bgOptions[i]
-                                        ? Colors.blue
-                                        : Colors.grey,
-                                    width: _bg == _bgOptions[i] ? 2 : 1,
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                // 壁纸（渐变背景）
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Padding(
-                        padding: EdgeInsets.only(top: 8), child: Text('壁纸')),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (var i = 0;
-                              i < ReaderPrefs.wallpapers.length;
-                              i++)
-                            GestureDetector(
-                              onTap: () async {
-                                setState(() => _wallpaper = i);
-                                setSheet(() => _wallpaper = i);
-                                final sp =
-                                    await SharedPreferences.getInstance();
-                                await sp.setInt('reader_wallpaper', i);
-                              },
-                              child: Container(
-                                width: 36,
-                                height: 26,
-                                decoration: BoxDecoration(
-                                  gradient: i == 0
-                                      ? null
-                                      : LinearGradient(
-                                          colors: ReaderPrefs.wallpapers[i],
-                                          begin: Alignment.topLeft,
-                                          end: Alignment.bottomRight),
-                                  color: i == 0 ? Colors.white : null,
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                    color: _wallpaper == i
-                                        ? Colors.blue
-                                        : Colors.grey,
-                                    width: _wallpaper == i ? 2 : 1,
-                                  ),
-                                ),
-                                child: i == 0
-                                    ? const Icon(Icons.block,
-                                        size: 12, color: Colors.grey)
-                                    : null,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                // 排版：段首缩进 / 两端对齐
-                Row(
-                  children: [
-                    const Text('段首缩进'),
-                    const Spacer(),
-                    Switch(
-                      value: _indent,
-                      onChanged: (v) async {
-                        setState(() => _indent = v);
-                        setSheet(() => _indent = v);
-                        final sp = await SharedPreferences.getInstance();
-                        await sp.setBool('reader_indent', v);
-                      },
-                    ),
-                  ],
-                ),
-                Row(
-                  children: [
-                    const Text('两端对齐'),
-                    const Spacer(),
-                    Switch(
-                      value: _justify,
-                      onChanged: (v) async {
-                        setState(() => _justify = v);
-                        setSheet(() => _justify = v);
-                        final sp = await SharedPreferences.getInstance();
-                        await sp.setBool('reader_justify', v);
-                      },
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                // 页边距（正文左右留白）
-                _sheetSlider('页边距', _pagePadH, 0, 40,
+                // 左右页边距（正文左右留白）
+                _sheetSlider('左右页边距', _pagePadH, 0, 60,
                     label: '${_pagePadH.round()}',
                     onChanged: (v) async {
                   setState(() => _pagePadH = v);
@@ -554,20 +373,15 @@ class _ReaderPageState extends State<ReaderPage>
                   final sp = await SharedPreferences.getInstance();
                   await sp.setDouble('reader_page_pad', v);
                 }),
-                // 翻页动画时长
-                _sheetSlider('翻页动画', _animMs.toDouble(), 100, 600,
-                    label: '$_animMs ms',
+                // 上下页边距（正文上下留白）
+                _sheetSlider('上下页边距', _pagePadV, 0, 80,
+                    label: '${_pagePadV.round()}',
                     onChanged: (v) async {
-                  setState(() => _animMs = v.round());
-                  setSheet(() => _animMs = v.round());
-                  _coverAnim.duration = Duration(milliseconds: _animMs);
+                  setState(() => _pagePadV = v);
+                  setSheet(() => _pagePadV = v);
                   final sp = await SharedPreferences.getInstance();
-                  await sp.setInt('reader_anim_ms', _animMs);
+                  await sp.setDouble('reader_page_pad_v', v);
                 }),
-                // 点击区域动作
-                _tapZoneRow('点左 1/3', _tapLeft, 'reader_tap_left', setSheet),
-                _tapZoneRow('点中 1/3', _tapMiddle, 'reader_tap_middle', setSheet),
-                _tapZoneRow('点右 1/3', _tapRight, 'reader_tap_right', setSheet),
                 // 沉浸阅读（隐藏状态栏）
                 Row(
                   children: [
@@ -592,14 +406,6 @@ class _ReaderPageState extends State<ReaderPage>
                   ],
                 ),
                 const SizedBox(height: 12),
-                _sheetSlider('亮度', _brightness, 0.3, 1.0,
-                    label: '${(_brightness * 100).round()}%',
-                    onChanged: (v) async {
-                  setState(() => _brightness = v);
-                  setSheet(() => _brightness = v);
-                  final sp = await SharedPreferences.getInstance();
-                  await sp.setDouble('reader_brightness', v);
-                }),
                 // 翻页效果
                 Row(
                   children: [
@@ -754,6 +560,102 @@ class _ReaderPageState extends State<ReaderPage>
     );
   }
 
+  /// 背景设置子面板：纸色背景 + 壁纸渐变（从设置弹窗移出）
+  Future<void> _showBackgroundSettings() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheet) => ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.78,
+          ),
+          child: SingleChildScrollView(
+            child: Glass(
+              radius: 24,
+              blur: 8,
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text('背景设置',
+                            style: TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.w700)),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        tooltip: '关闭',
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                  // 背景（8 主题）
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                          padding: EdgeInsets.only(top: 8), child: Text('背景')),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (var i = 0; i < _bgOptions.length; i++)
+                              GestureDetector(
+                                onTap: () async {
+                                  setState(() => _bg = _bgOptions[i]);
+                                  setSheet(() => _bg = _bgOptions[i]);
+                                  final sp =
+                                      await SharedPreferences.getInstance();
+                                  await sp.setInt('reader_bg', i);
+                                },
+                                child: Container(
+                                  width: 36,
+                                  height: 26,
+                                  decoration: BoxDecoration(
+                                    color: _bgOptions[i],
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: _bg == _bgOptions[i]
+                                          ? Colors.blue
+                                          : Colors.grey,
+                                      width: _bg == _bgOptions[i] ? 2 : 1,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  // 亮度（屏幕视觉，与背景同类）
+                  _sheetSlider('亮度', _brightness, 0.3, 1.0,
+                      label: '${(_brightness * 100).round()}%',
+                      onChanged: (v) async {
+                    setState(() => _brightness = v);
+                    setSheet(() => _brightness = v);
+                    final sp = await SharedPreferences.getInstance();
+                    await sp.setDouble('reader_brightness', v);
+                  }),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   /// 字体设置子面板：字号 / 行距 / 段距 / 字体族（从设置弹窗移出）
   Future<void> _showFontSettings() async {
     await showModalBottomSheet(
@@ -798,7 +700,7 @@ class _ReaderPageState extends State<ReaderPage>
                     final sp = await SharedPreferences.getInstance();
                     await sp.setDouble('reader_font_size', v);
                   }),
-                  _sheetSlider('行距', _lineHeight, 1.4, 2.4,
+                  _sheetSlider('行距', _lineHeight, 1.0, 2.2,
                       label: _lineHeight.toStringAsFixed(2),
                       onChanged: (v) async {
                     setState(() => _lineHeight = v);
@@ -813,6 +715,37 @@ class _ReaderPageState extends State<ReaderPage>
                     final sp = await SharedPreferences.getInstance();
                     await sp.setInt('reader_para_gap', v.round());
                   }),
+                  // 段首缩进 / 两端对齐（排版，与字号行距同类）
+                  Row(
+                    children: [
+                      const Text('段首缩进'),
+                      const Spacer(),
+                      Switch(
+                        value: _indent,
+                        onChanged: (v) async {
+                          setState(() => _indent = v);
+                          setSheet(() => _indent = v);
+                          final sp = await SharedPreferences.getInstance();
+                          await sp.setBool('reader_indent', v);
+                        },
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      const Text('两端对齐'),
+                      const Spacer(),
+                      Switch(
+                        value: _justify,
+                        onChanged: (v) async {
+                          setState(() => _justify = v);
+                          setSheet(() => _justify = v);
+                          final sp = await SharedPreferences.getInstance();
+                          await sp.setBool('reader_justify', v);
+                        },
+                      ),
+                    ],
+                  ),
                   // 字体族
                   Row(
                     children: [
@@ -992,7 +925,7 @@ class _ReaderPageState extends State<ReaderPage>
 
   @override
   Widget build(BuildContext context) {
-    final useWall = _wallpaperColors.isNotEmpty;
+    final useWall = _wallpaperImg.isNotEmpty || _wallpaperColors.isNotEmpty;
     final dark = _effDark();
     final fg = dark ? const Color(0xFFB0B0B0) : const Color(0xFF333333);
     return Focus(
@@ -1002,16 +935,25 @@ class _ReaderPageState extends State<ReaderPage>
       backgroundColor: useWall ? Colors.transparent : _bg,
       body: Stack(
         children: [
-          // 背景壁纸（渐变）
+          // 背景壁纸：本地图片 或 内置渐变
           if (useWall)
             Positioned.fill(
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: _wallpaperColors,
-                  ),
+                  image: _wallpaperImg.isNotEmpty
+                      ? DecorationImage(
+                          image: FileImage(File(_wallpaperImg)),
+                          fit: BoxFit.cover,
+                        )
+                      : null,
+                  gradient: _wallpaperImg.isEmpty &&
+                          _wallpaperColors.isNotEmpty
+                      ? LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: _wallpaperColors,
+                        )
+                      : null,
                 ),
               ),
             ),
@@ -1020,6 +962,13 @@ class _ReaderPageState extends State<ReaderPage>
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTapUp: _noteMode ? null : _handleTap,
+              // 小说正文：向下快滑切换当前章书签（下拉添加 / 再下拉取消）
+              onVerticalDragEnd: _content?.isComic == true
+                  ? null
+                  : (d) {
+                      final v = d.primaryVelocity ?? 0;
+                      if (v > 400) _toggleBookmark();
+                    },
               // 菜单显示时禁用正文手势（滑动/缩放/双击），第一下点击先隐藏菜单
               child: IgnorePointer(
                 ignoring: _showControls,
@@ -1105,6 +1054,24 @@ class _ReaderPageState extends State<ReaderPage>
                       ),
                     ),
                   ),
+                  // 右上角书签标签：仅已加书签时显示金色标签，未加不显示。
+                  // 点击，或在正文向下快滑，添加/取消当前章书签。
+                  if (_bookmarked)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 6, top: 2),
+                        child: InkWell(
+                          onTap: _toggleBookmark,
+                          customBorder: const CircleBorder(),
+                          child: Padding(
+                            padding: const EdgeInsets.all(6),
+                            child: const Icon(Icons.bookmark,
+                                color: Color(0xFFE5A13A), size: 24),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -1216,33 +1183,13 @@ class _ReaderPageState extends State<ReaderPage>
     }
     final w = MediaQuery.of(context).size.width;
     final x = d.localPosition.dx;
+    // 默认三区：左 1/3 上一页，右 1/3 下一页，中间呼出菜单
     if (x < w / 3) {
-      _runTapAction(_tapLeft);
+      _prevPage();
     } else if (x > w * 2 / 3) {
-      _runTapAction(_tapRight);
+      _nextPage();
     } else {
-      _runTapAction(_tapMiddle);
-    }
-  }
-
-  /// 执行点击区域动作：0 上一页 / 1 下一页 / 2 呼出菜单 / 3 目录 / 4 无。
-  void _runTapAction(int action) {
-    switch (action) {
-      case 0:
-        _prevPage();
-        break;
-      case 1:
-        _nextPage();
-        break;
-      case 2:
-        setState(() => _showControls = true);
-        break;
-      case 3:
-        _showControls = false;
-        _showToc();
-        break;
-      case 4:
-        break; // 无动作
+      setState(() => _showControls = true);
     }
   }
 
@@ -1258,7 +1205,7 @@ class _ReaderPageState extends State<ReaderPage>
     }
     if (_pageIndex < _pages.length - 1) {
       _pageController.nextPage(
-          duration: Duration(milliseconds: _animMs), curve: Curves.easeOut);
+          duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
     } else {
       _pendingPage = 0;
       _next();
@@ -1277,7 +1224,7 @@ class _ReaderPageState extends State<ReaderPage>
     }
     if (_pageIndex > 0) {
       _pageController.previousPage(
-          duration: Duration(milliseconds: _animMs), curve: Curves.easeOut);
+          duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
     } else {
       _pendingPage = 1 << 30; // 定位到最后一屏
       _prev();
@@ -1342,6 +1289,8 @@ class _ReaderPageState extends State<ReaderPage>
             const SizedBox(width: 40),
             _roundBtn(Icons.text_fields, '字体', _showFontSettings),
             const SizedBox(width: 40),
+            _roundBtn(Icons.palette_outlined, '背景', _showBackgroundSettings),
+            const SizedBox(width: 40),
             _roundBtn(Icons.settings, '设置', _showSettings),
           ],
         ),
@@ -1386,20 +1335,38 @@ class _ReaderPageState extends State<ReaderPage>
   /// 打开目录：常驻面板已缓存，仅滑入 + 定位当前章（不重建列表 → 秒开）。
   void _showToc() {
     setState(() => _tocOpen = true);
+    _loadTocMarks();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_tocOpen || !_tocController.hasClients) return;
       final list = _list;
       if (list.isEmpty) return;
-      _tocController.jumpTo((_index - 3).clamp(0, list.length - 1) * 48.0);
+      final target = _tocReverse ? list.length - 1 - _index : _index;
+      _tocController.jumpTo((target - 3).clamp(0, list.length - 1) * 48.0);
+    });
+  }
+
+  /// 加载本书的书签/笔记（目录面板书签/笔记 tab 用）。
+  Future<void> _loadTocMarks() async {
+    final bms = await MarksService.getBookmarks();
+    final notes = await MarksService.getNotes();
+    if (!mounted) return;
+    setState(() {
+      _tocBookmarks = bms
+          .where((b) => b.book.bookUrl == widget.book.bookUrl)
+          .toList();
+      _tocNotes = notes
+          .where((n) => n.book.bookUrl == widget.book.bookUrl)
+          .toList();
     });
   }
 
   /// 目录面板内容（常驻树内缓存，打开时不再重建）。
+  /// 封面+书名+作者头部，目录/书签/笔记三 tab，正序下拉，章节列表，底部搜索。
   Widget _tocPanel() {
     final list = _list;
     final dark = _effDark();
     final fg = dark ? const Color(0xFFB0B0B0) : const Color(0xFF333333);
-    final sel = _index;
+    const accent = Color(0xFF3E8EF7);
     return Glass(
       radius: 24,
       blur: 8,
@@ -1408,52 +1375,287 @@ class _ReaderPageState extends State<ReaderPage>
         height: MediaQuery.of(context).size.height * 0.72,
         child: Column(
           children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              color: const Color(0xFF3E8EF7).withValues(alpha: 0.14),
-              child: Text(
-                '目录（${list.length} 章）',
-                style: TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.w700, color: fg),
-              ),
-            ),
-            Expanded(
-              child: ListView.builder(
-                controller: _tocController,
-                itemExtent: 48,
-                itemCount: list.length,
-                itemBuilder: (context, i) {
-                  final selected = i == sel;
-                  return ListTile(
-                    dense: true,
-                    selected: selected,
-                    selectedTileColor:
-                        Theme.of(context).colorScheme.primaryContainer,
-                    title: Text(
-                      list[i].title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontWeight: selected
-                            ? FontWeight.w600
-                            : FontWeight.normal,
-                        color: selected
-                            ? Theme.of(context).colorScheme.primary
-                            : fg,
-                      ),
+            // 封面 + 书名 + 作者
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+              child: Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: SizedBox(
+                      width: 52,
+                      height: 70,
+                      child: widget.book.cover.isEmpty
+                          ? Container(color: Colors.grey.shade300)
+                          : CoverImage(widget.book.cover,
+                              sourceId: widget.book.sourceId,
+                              fit: BoxFit.cover),
                     ),
-                    onTap: () {
-                      setState(() => _tocOpen = false); // 关面板
-                      if (i != _index) _loadChapter(i);
-                    },
-                  );
-                },
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(widget.book.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w700,
+                                color: fg)),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Icon(Icons.person_outline,
+                                size: 14, color: fg.withValues(alpha: 0.6)),
+                            const SizedBox(width: 4),
+                            Text(widget.book.author,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    color: fg.withValues(alpha: 0.6))),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
+            // tab：目录 / 书签 / 笔记
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: dark ? 0.08 : 0.55),
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                child: Row(
+                  children: [
+                    _tocTabBtn('目录', 0, Icons.menu, fg, accent, dark),
+                    _tocTabBtn('书签', 1, Icons.bookmark_border, fg, accent, dark),
+                    _tocTabBtn('笔记', 2, Icons.edit_note, fg, accent, dark),
+                  ],
+                ),
+              ),
+            ),
+            // 目录 tab：共 X 章 + 正序下拉
+            if (_tocTab == 0)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                child: Row(
+                  children: [
+                    Text('共 ${list.length} 章',
+                        style: TextStyle(fontSize: 14, color: fg)),
+                    const Spacer(),
+                    DropdownButton<bool>(
+                      value: _tocReverse,
+                      isDense: true,
+                      underline: const SizedBox.shrink(),
+                      items: const [
+                        DropdownMenuItem(value: false, child: Text('正序')),
+                        DropdownMenuItem(value: true, child: Text('倒序')),
+                      ],
+                      onChanged: (v) {
+                        if (v == null) return;
+                        setState(() => _tocReverse = v);
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (!_tocController.hasClients) return;
+                          final t = v ? list.length - 1 - _index : _index;
+                          _tocController.jumpTo(
+                              (t - 3).clamp(0, list.length - 1) * 48.0);
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            // 内容
+            Expanded(
+              child: _tocTab == 0
+                  ? _tocChapterList(list, fg)
+                  : _tocTab == 1
+                      ? _tocBookmarkList(fg)
+                      : _tocNoteList(fg),
+            ),
+            // 底部搜索（仅目录 tab）
+            if (_tocTab == 0)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
+                child: Container(
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: dark ? 0.08 : 0.85),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: TextField(
+                    controller: _tocSearchCtrl,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      prefixIcon: Icon(Icons.search,
+                          size: 18, color: fg.withValues(alpha: 0.6)),
+                      hintText: '搜索标题',
+                      hintStyle: TextStyle(
+                          fontSize: 13, color: fg.withValues(alpha: 0.5)),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                    onChanged: (v) => setState(() => _tocFilter = v.trim()),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _tocTabBtn(String label, int tab, IconData icon, Color fg,
+      Color accent, bool dark) {
+    final sel = _tocTab == tab;
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () => setState(() => _tocTab = tab),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 7),
+          decoration: BoxDecoration(
+            color: sel ? accent : Colors.transparent,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 15, color: sel ? Colors.white : fg),
+              const SizedBox(width: 5),
+              Text(label,
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: sel ? FontWeight.w600 : FontWeight.w400,
+                      color: sel ? Colors.white : fg)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 目录章节列表（支持正序/倒序 + 搜索过滤 + 当前章高亮 ✓）
+  Widget _tocChapterList(List<Chapter> list, Color fg) {
+    final ordered = _tocReverse ? list.reversed.toList() : list;
+    final filtered = _tocFilter.isEmpty
+        ? ordered
+        : ordered
+            .where((c) =>
+                c.title.toLowerCase().contains(_tocFilter.toLowerCase()))
+            .toList();
+    if (filtered.isEmpty) {
+      return Center(
+        child: Text('没有匹配「$_tocFilter」的章节',
+            style: TextStyle(color: fg.withValues(alpha: 0.6))),
+      );
+    }
+    return ListView.builder(
+      controller: _tocController,
+      itemExtent: 48,
+      itemCount: filtered.length,
+      itemBuilder: (context, i) {
+        final c = filtered[i];
+        final allIndex = list.indexOf(c);
+        final selected = allIndex == _index;
+        return ListTile(
+          dense: true,
+          selected: selected,
+          selectedTileColor:
+              Theme.of(context).colorScheme.primaryContainer,
+          title: Text(
+            c.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+              color: selected
+                  ? Theme.of(context).colorScheme.primary
+                  : fg,
+            ),
+          ),
+          trailing: selected
+              ? Icon(Icons.check,
+                  size: 16, color: Theme.of(context).colorScheme.primary)
+              : null,
+          onTap: () {
+            setState(() => _tocOpen = false); // 关面板
+            if (allIndex != _index) _loadChapter(allIndex);
+          },
+        );
+      },
+    );
+  }
+
+  /// 书签列表（本书）
+  Widget _tocBookmarkList(Color fg) {
+    if (_tocBookmarks.isEmpty) {
+      return Center(
+        child: Text('暂无书签',
+            style: TextStyle(color: fg.withValues(alpha: 0.6))),
+      );
+    }
+    return ListView.builder(
+      itemCount: _tocBookmarks.length,
+      itemBuilder: (context, i) {
+        final bm = _tocBookmarks[i];
+        return ListTile(
+          dense: true,
+          leading: const Icon(Icons.bookmark, size: 16, color: Color(0xFFE5A13A)),
+          title: Text(bm.chapterTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 14, color: fg)),
+          onTap: () {
+            setState(() => _tocOpen = false);
+            if (bm.chapterIndex != _index) _loadChapter(bm.chapterIndex);
+          },
+        );
+      },
+    );
+  }
+
+  /// 笔记列表（本书）
+  Widget _tocNoteList(Color fg) {
+    if (_tocNotes.isEmpty) {
+      return Center(
+        child: Text('暂无笔记',
+            style: TextStyle(color: fg.withValues(alpha: 0.6))),
+      );
+    }
+    return ListView.builder(
+      itemCount: _tocNotes.length,
+      itemBuilder: (context, i) {
+        final n = _tocNotes[i];
+        return ListTile(
+          dense: true,
+          leading: const Icon(Icons.edit_note, size: 18, color: Color(0xFF3E8EF7)),
+          title: Text(n.text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 14, color: fg)),
+          subtitle: n.note.isEmpty
+              ? null
+              : Text(n.note,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 12, color: fg.withValues(alpha: 0.6))),
+          onTap: () {
+            setState(() => _tocOpen = false);
+            if (n.chapterIndex != _index) _loadChapter(n.chapterIndex);
+          },
+        );
+      },
     );
   }
 
@@ -1499,7 +1701,6 @@ class _ReaderPageState extends State<ReaderPage>
 
   // ---------- 小说分页（左右翻页 + 本章进度） ----------
 
-  static const double _pagePadV = 24;
   /// 页眉章节名 + 间距 占用的高度（正文从其下方开始）
   static const double _headerH = 24;
   /// 页脚分页进度 + 间距 占用的高度
@@ -1664,7 +1865,7 @@ class _ReaderPageState extends State<ReaderPage>
       _reflowKey = null;
       return;
     }
-    final gap = '\n' * (2 + _paraGap); // 段距：段落间空行数（基础 1 空行 + 调节）
+    final gap = '\n' * (1 + _paraGap); // 段距：段落间空行数（基础 1 空行 + 调节）
     final fullText = c.paras
         .map((p) => '${_indent ? '　　' : ''}$p')
         .join(gap);

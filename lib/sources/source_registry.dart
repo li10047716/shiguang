@@ -5,6 +5,7 @@
 /// 对应 shiguang 的 `core.book()/chapter()` 按书号前缀分派。
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/book_source.dart';
@@ -23,7 +24,7 @@ import 'native/shuqi.dart';
 import 'rule_source.dart';
 import 'source.dart';
 
-class SourceRegistry {
+class SourceRegistry with ChangeNotifier {
   SourceRegistry._() {
     _loadRuleSources();
     _loadNativeSources();
@@ -92,18 +93,20 @@ class SourceRegistry {
   }
 
   /// 切换书源启用状态（持久化）。规则源走 SourceRepository，硬编码源走本地 prefs。
+  /// 通知监听者（如发现页）刷新启用的书源列表。
   Future<void> toggleEnabled(String sourceId, bool enabled) async {
     if (SourceRepository().byId(sourceId) != null) {
       await SourceRepository().toggle(sourceId, enabled);
-      return;
-    }
-    final sp = await SharedPreferences.getInstance();
-    await sp.setBool('source_enabled_$sourceId', enabled);
-    if (enabled) {
-      _hardDisabled.remove(sourceId);
     } else {
-      _hardDisabled[sourceId] = true;
+      final sp = await SharedPreferences.getInstance();
+      await sp.setBool('source_enabled_$sourceId', enabled);
+      if (enabled) {
+        _hardDisabled.remove(sourceId);
+      } else {
+        _hardDisabled[sourceId] = true;
+      }
     }
+    notifyListeners();
   }
 
   /// 启用中的全部书源（任意类型）
