@@ -79,10 +79,19 @@ jobs:
         if: env.IOS_SIGN == 'true'
         run: flutter build ipa --release --export-options-plist=ExportOptions.plist
 
-      # ---------- 无签名模式（编译验证） ----------
+      # ---------- 无签名模式（编译验证 + 供 Sideloadly 自签） ----------
       - name: Build unsigned (compile check)
         if: env.IOS_SIGN != 'true'
         run: flutter build ios --release --no-codesign
+
+      # 把无签名 .app 打包成标准 Payload 结构的 .ipa，供 Sideloadly 用 Apple ID 自签
+      - name: Package unsigned ipa (for Sideloadly)
+        if: env.IOS_SIGN != 'true'
+        run: |
+          mkdir -p Payload
+          cp -r build/ios/iphoneos/Runner.app Payload/
+          zip -ry shiguang-unsigned.ipa Payload
+          ls -lh shiguang-unsigned.ipa
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -91,5 +100,6 @@ jobs:
           path: |
             build/ios/ipa/*.ipa
             build/ios/iphoneos/*.app
+            shiguang-unsigned.ipa
           if-no-files-found: warn
 # retry-trigger 20261115
