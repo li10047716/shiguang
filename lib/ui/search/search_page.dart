@@ -113,7 +113,7 @@ class _SearchPageState extends State<SearchPage> {
           ),
           child: Glass(
             radius: 24,
-            blur: 8,
+            blur: 3,
             padding: const EdgeInsets.all(20),
             child: Column(
               mainAxisSize: MainAxisSize.min,

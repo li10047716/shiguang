@@ -109,7 +109,7 @@ class _GlassMenuState extends State<GlassMenu> {
           width: menuW,
           child: Glass(
             radius: 14,
-            blur: 18,
+            blur: 3,
             padding: const EdgeInsets.symmetric(vertical: 6),
             child: Column(
               mainAxisSize: MainAxisSize.min,

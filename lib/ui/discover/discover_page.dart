@@ -5,6 +5,7 @@
 /// （封面在左，信息在右：书名 / 来源 / 分类 / 简介）。
 library;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/book.dart';
@@ -219,14 +220,14 @@ class _DiscoverPageState extends State<DiscoverPage>
   }
 
   // 刷新：清当前源/标签缓存（内存+磁盘），强制重载
-  void _refresh() {
+  Future<void> _refresh() {
     final key = _cacheKey;
     if (key.isNotEmpty) {
       _cache.remove(key);
       DiscoverCache.clear(key);
     }
     _forceRefresh = true;
-    _load(reset: true).whenComplete(() => _forceRefresh = false);
+    return _load(reset: true).whenComplete(() => _forceRefresh = false);
   }
 
   void _pickSource(NovelSource s) {
@@ -272,65 +273,64 @@ class _DiscoverPageState extends State<DiscoverPage>
                 children: [
                   // 内容（分类行 + 芯片 + 书籍）铺满，顶部预留悬浮胶囊高度
                   Positioned.fill(child: _body()),
-                  // 右上角悬浮玻璃胶囊：搜索 / 书源选择 / 刷新
-                  Positioned(top: 12, right: 16, child: _topCapsule()),
+                  // 顶部悬浮条：搜索(左) / 书源选择(中) / 刷新(右)，各自独立
+                  Positioned(top: 12, left: 16, right: 16, child: _topBar()),
                 ],
               ),
             ),
     );
   }
 
-  // ---------- 顶部悬浮胶囊 ----------
+  // ---------- 顶部悬浮条：搜索(左) / 书源选择(中) / 刷新(右) ----------
 
-  Widget _topCapsule() {
+  Widget _topBar() {
     final s = _source!;
-    return Glass(
-      radius: 22,
-      blur: 18,
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // 搜索
-          GlassRoundButton(
-            icon: Icons.search,
-            tooltip: '搜索',
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SearchPage()),
-            ),
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        // 左上：搜索（关闭投影，玻璃底直接贴背景，不出现额外暗层）
+        GlassRoundButton(
+          icon: Icons.search,
+          tooltip: '搜索',
+          shadow: false,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const SearchPage()),
           ),
-          // 书源选择（文本 + 箭头，点击弹玻璃下拉）
-          GestureDetector(
+        ),
+        // 中间：书源选择（独立玻璃胶囊，点击弹玻璃下拉；关闭投影）
+        Glass(
+          radius: 50,
+          blur: 3,
+          shadow: false,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: GestureDetector(
             key: _sourceKey,
             onTap: _toggleSourceMenu,
-            child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.menu_book,
-                      size: 16, color: Color(0xFFE5A13A)),
-                  const SizedBox(width: 6),
-                  Text(s.sourceName,
-                      style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey.shade800)),
-                  Icon(Icons.arrow_drop_down,
-                      size: 20, color: Colors.grey.shade800),
-                ],
-              ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.menu_book,
+                    size: 16, color: Color(0xFFE5A13A)),
+                const SizedBox(width: 6),
+                Text(s.sourceName,
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade800)),
+                Icon(Icons.arrow_drop_down,
+                    size: 20, color: Colors.grey.shade800),
+              ],
             ),
           ),
-          // 刷新
-          GlassRoundButton(
-            icon: Icons.refresh,
-            tooltip: '刷新',
-            onTap: _refresh,
-          ),
-        ],
-      ),
+        ),
+        // 右上：刷新（关闭投影）
+        GlassRoundButton(
+          icon: Icons.refresh,
+          tooltip: '刷新',
+          shadow: false,
+          onTap: _refresh,
+        ),
+      ],
     );
   }
 
@@ -395,7 +395,7 @@ class _DiscoverPageState extends State<DiscoverPage>
           width: menuW,
           child: Glass(
             radius: 14,
-            blur: 18,
+            blur: 3,
             padding: const EdgeInsets.symmetric(vertical: 6),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -456,12 +456,36 @@ class _DiscoverPageState extends State<DiscoverPage>
 
   // ---------- 分节 tab：榜单 / 分类 ----------
 
+  // ---------- 分类区：圆角矩形框（榜单/分类 + 分类芯片，芯片放不下自动换行） ----------
+
+  Widget _categoryBox() {
+    // 无榜单且无分类时不渲染空玻璃框
+    if (_ranks.isEmpty && _cats.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      // 顶部让出顶栏高度（顶栏 top:12 + 约 48 高），分类框整体下移避开悬浮按钮
+      padding: const EdgeInsets.fromLTRB(16, 60, 16, 0),
+      child: Glass(
+        radius: 20,
+        blur: 3,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _sectionTabs(),
+            _chips(),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _sectionTabs() {
     final hasRank = _ranks.isNotEmpty;
     final hasCat = _cats.isNotEmpty;
     if (!hasRank && !hasCat) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         children: [
           if (hasRank) _sectionTab('榜单', true),
@@ -479,8 +503,11 @@ class _DiscoverPageState extends State<DiscoverPage>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 7),
         decoration: BoxDecoration(
-          color: active ? _blue : Colors.transparent,
+          color: active ? _blue : Colors.white.withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: active ? _blue : Colors.white.withValues(alpha: 0.5),
+          ),
         ),
         child: Text(
           label,
@@ -499,122 +526,146 @@ class _DiscoverPageState extends State<DiscoverPage>
   Widget _chips() {
     final tabs = _sectionRank ? _ranks : _cats;
     if (tabs.isEmpty) return const SizedBox.shrink();
-    return SizedBox(
-      height: 44,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        children: [
-          for (final t in tabs)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: GestureDetector(
-                onTap: () => _pickTab(t),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: t == _tab
-                        ? _blue
-                        : Colors.white.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: t == _tab
-                          ? _blue
-                          : Colors.white.withValues(alpha: 0.5),
-                    ),
-                  ),
-                  child: Text(
-                    t.name,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight:
-                          t == _tab ? FontWeight.w600 : FontWeight.w400,
-                      color:
-                          t == _tab ? Colors.white : Colors.grey.shade700,
-                    ),
-                  ),
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final t in tabs)
+          GestureDetector(
+            onTap: () => _pickTab(t),
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 7),
+              decoration: BoxDecoration(
+                color: t == _tab
+                    ? _blue
+                    : Colors.white.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: t == _tab
+                      ? _blue
+                      : Colors.white.withValues(alpha: 0.5),
+                ),
+              ),
+              child: Text(
+                t.name,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight:
+                      t == _tab ? FontWeight.w600 : FontWeight.w400,
+                  color:
+                      t == _tab ? Colors.white : Colors.grey.shade700,
                 ),
               ),
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 
   // ---------- 内容 ----------
 
   Widget _body() {
-    if (_error != null && _books.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.cloud_off, size: 48, color: Colors.grey),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Text(_error!, textAlign: TextAlign.center),
-            ),
-            const SizedBox(height: 12),
-            FilledButton(
-              onPressed: () => _load(reset: true),
-              child: const Text('重试'),
-            ),
-          ],
-        ),
-      );
-    }
-    if (_books.isEmpty) {
-      return _loading
-          ? const Center(child: CircularProgressIndicator())
-          : const Center(child: Text('暂无内容'));
-    }
     final isMobile = MediaQuery.of(context).size.width < 600;
-    // 分类行与书籍一体滚动（分类不固定，随列表滚动）
+    // 分类框常驻；切换标签/源时只有下方书籍区随加载状态刷新，
+    // 上面的「榜单/分类」和芯片保持不动。
+    // 内容铺到顶（不再留 60 空带，避免顶部露裸渐变「遮罩带」）。
     return Padding(
-      // 顶部预留悬浮胶囊高度，避免分类行被压住
-      padding: const EdgeInsets.only(top: 60),
-      child: CustomScrollView(
-        controller: _scrollCtrl,
-        slivers: [
-          SliverToBoxAdapter(child: _sectionTabs()),
-        SliverToBoxAdapter(child: _chips()),
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-          sliver: SliverGrid(
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              // 手机屏窄：横向卡（封面左+信息右）3 列会挤到只剩一条缝，降为 1 列全宽
-              crossAxisCount: isMobile ? 1 : 3,
-              childAspectRatio: isMobile ? 2.6 : 2.55,
-              crossAxisSpacing: 14,
-              mainAxisSpacing: 14,
-            ),
-            delegate: SliverChildBuilderDelegate(
-              (context, i) => _DiscoverCard(book: _books[i]),
-              childCount: _books.length,
-            ),
+      padding: EdgeInsets.zero,
+      child: RefreshIndicator(
+        onRefresh: _refresh,
+        child: ScrollConfiguration(
+          // 桌面端默认鼠标拖拽不滚动列表，这里允许鼠标/触屏拖拽，
+          // 才能产生过滚触发 RefreshIndicator 下拉刷新。
+          behavior: ScrollConfiguration.of(context).copyWith(
+            dragDevices: {
+              PointerDeviceKind.touch,
+              PointerDeviceKind.mouse,
+              PointerDeviceKind.stylus,
+              PointerDeviceKind.trackpad,
+            },
+          ),
+          child: CustomScrollView(
+            controller: _scrollCtrl,
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              SliverToBoxAdapter(child: _categoryBox()),
+              // 书籍区：错误 / 加载 / 空 / 网格（仅此区随标签切换刷新）
+              if (_error != null && _books.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _errorView(),
+                )
+              else if (_books.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _loading
+                      ? const Center(child: CircularProgressIndicator())
+                      : const Center(child: Text('暂无内容')),
+                )
+              else ...[
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                  sliver: SliverGrid(
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      // 手机屏窄：横向卡（封面左+信息右）3 列会挤到只剩一条缝，降为 1 列全宽
+                      crossAxisCount: isMobile ? 1 : 3,
+                      childAspectRatio: isMobile ? 2.6 : 2.55,
+                      crossAxisSpacing: 14,
+                      mainAxisSpacing: 14,
+                    ),
+                    delegate: SliverChildBuilderDelegate(
+                      (context, i) => _DiscoverCard(book: _books[i]),
+                      childCount: _books.length,
+                    ),
+                  ),
+                ),
+                if (_more)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _loading
+                          ? const SizedBox(
+                              width: 22, height: 22,
+                              child:
+                                  CircularProgressIndicator(strokeWidth: 2))
+                          : GestureDetector(
+                              onTap: () {
+                                _page++;
+                                _load();
+                              },
+                              child: Text(
+                                '上拉或点击加载更多（$_page/$_pages 页）',
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.grey),
+                              ),
+                            ),
+                    ),
+                  ),
+              ],
+            ],
           ),
         ),
-        if (_more)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _loading
-                  ? const SizedBox(
-                      width: 22, height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : GestureDetector(
-                      onTap: () {
-                        _page++;
-                        _load();
-                      },
-                      child: Text(
-                        '上拉或点击加载更多（$_page/$_pages 页）',
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
-                      ),
-                    ),
-            ),
+      ),
+    );
+  }
+
+  // 书籍区错误视图（分类框仍在，仅书籍区显示重试）
+  Widget _errorView() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.cloud_off, size: 48, color: Colors.grey),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text(_error!, textAlign: TextAlign.center),
+          ),
+          const SizedBox(height: 12),
+          FilledButton(
+            onPressed: () => _load(reset: true),
+            child: const Text('重试'),
           ),
         ],
       ),
@@ -644,7 +695,12 @@ class _DiscoverCard extends StatelessWidget {
             children: [
               SizedBox(
                 width: 86,
-                child: CoverImage(book.cover, sourceId: book.sourceId),
+                child: ClipRRect(
+                  // 封面四角都圆：卡片外层 Material 只裁左边缘（封面左角），
+                  // 封面右缘在卡片内部是直角，这里补上同款圆角。
+                  borderRadius: BorderRadius.circular(10),
+                  child: CoverImage(book.cover, sourceId: book.sourceId),
+                ),
               ),
               Expanded(
                 child: Padding(

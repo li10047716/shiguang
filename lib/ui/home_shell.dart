@@ -27,7 +27,7 @@ class _HomeShellState extends State<HomeShell> {
     (Icons.person_outline, Icons.person, '我的'),
   ];
 
-  static const _activeColor = Color(0xFF2E7D5B);
+  static const _activeColor = Color(0xFF0088FF);
 
   @override
   Widget build(BuildContext context) {
@@ -65,8 +65,8 @@ class _HomeShellState extends State<HomeShell> {
     final inactiveColor = Colors.grey.shade600;
     // 液态玻璃椭圆胶囊：包住三个导航按钮
     return Glass(
-      radius: 24,
-      blur: 18,
+      radius: 50,
+      blur: 3,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Stack(
         children: [
@@ -84,8 +84,8 @@ class _HomeShellState extends State<HomeShell> {
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 4),
                 decoration: BoxDecoration(
-                  color: _activeColor.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(16),
+                  color: _activeColor.withValues(alpha: 0.28),
+                  borderRadius: BorderRadius.circular(50),
                 ),
               ),
             ),
@@ -97,7 +97,7 @@ class _HomeShellState extends State<HomeShell> {
               for (var i = 0; i < _items.length; i++) ...[
                 if (i > 0) const SizedBox(width: 4),
                 InkWell(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(50),
                   onTap: () => setState(() => _index = i),
                   child: SizedBox(
                     width: itemW,
@@ -109,13 +109,13 @@ class _HomeShellState extends State<HomeShell> {
                           Icon(
                             i == _index ? _items[i].$2 : _items[i].$1,
                             color: i == _index ? _activeColor : inactiveColor,
-                            size: 22,
+                            size: 26,
                           ),
                           const SizedBox(height: 3),
                           Text(
                             _items[i].$3,
                             style: TextStyle(
-                              fontSize: 11,
+                              fontSize: 10,
                               fontWeight: i == _index
                                   ? FontWeight.w600
                                   : FontWeight.w400,

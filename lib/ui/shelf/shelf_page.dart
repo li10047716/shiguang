@@ -5,7 +5,10 @@
 /// （封面在左带「小说/漫画」角标，信息在右：书名/作者/已读/来源/最新章节）。
 library;
 
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -91,8 +94,26 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
           child: Stack(
             children: [
               // 书籍卡片铺满（顶部预留悬浮胶囊高度，避免首卡被压住）
+              // 下拉刷新：重载本地数据 + 后台检查更新
               Positioned.fill(
-                child: books.isEmpty ? _empty() : _grid(books),
+                child: books.isEmpty
+                    ? _empty()
+                    : RefreshIndicator(
+                        onRefresh: _refreshShelf,
+                        child: ScrollConfiguration(
+                          // 桌面端默认鼠标拖拽不滚动，启用鼠标/触屏拖拽，
+                          // 才能产生过滚触发下拉刷新。
+                          behavior: ScrollConfiguration.of(context).copyWith(
+                            dragDevices: {
+                              PointerDeviceKind.touch,
+                              PointerDeviceKind.mouse,
+                              PointerDeviceKind.stylus,
+                              PointerDeviceKind.trackpad,
+                            },
+                          ),
+                          child: _grid(books),
+                        ),
+                      ),
               ),
               // 右上角悬浮玻璃胶囊：全部▾ / 视图 / 搜索 / ⋮
               if (!_manageMode)
@@ -159,7 +180,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
       barrierColor: Colors.transparent,
       builder: (context) => Glass(
         radius: 24,
-        blur: 18,
+        blur: 3,
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -324,7 +345,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
       builder: (context) => StatefulBuilder(
         builder: (context, setSheet) => Glass(
           radius: 24,
-          blur: 18,
+          blur: 3,
           padding: EdgeInsets.zero,
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -447,7 +468,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
       builder: (context) => GlassDialog(
         child: Glass(
           radius: 20,
-          blur: 18,
+          blur: 3,
           padding: const EdgeInsets.all(20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -519,7 +540,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
         maxWidth: 460,
         child: Glass(
           radius: 20,
-          blur: 18,
+          blur: 3,
           padding: const EdgeInsets.all(20),
           child: StatefulBuilder(
             builder: (context, setSheet) => Column(
@@ -612,7 +633,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
       builder: (context) => GlassDialog(
         child: Glass(
           radius: 20,
-          blur: 18,
+          blur: 3,
           padding: const EdgeInsets.all(20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -729,8 +750,8 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   /// 右上角悬浮玻璃胶囊：全部▾筛选 / 视图切换 / 搜索 / ⋮更多。
   Widget _topCapsule() {
     return Glass(
-      radius: 22,
-      blur: 18,
+      radius: 50,
+      blur: 3,
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -883,8 +904,8 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   Widget _manageBar() {
     final all = ref.read(libraryProvider);
     return Glass(
-      radius: 22,
-      blur: 18,
+      radius: 50,
+      blur: 3,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -984,6 +1005,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     if (_listView) {
       return ListView.builder(
         controller: _scrollCtrl,
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(24, 60, 24, 24),
         itemCount: display.length,
         itemBuilder: (context, i) => Padding(
@@ -1006,7 +1028,8 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     final isMobile = MediaQuery.of(context).size.width < 600;
     return GridView.builder(
       controller: _scrollCtrl,
-      padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(24, 60, 24, 24),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         // 手机屏窄：横向卡（封面左+信息右）3 列会挤到只剩一条缝，降为 1 列全宽
         crossAxisCount: isMobile ? 1 : 3,
@@ -1041,6 +1064,50 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   }
 
   // ---------- 数据 ----------
+
+  // 下拉刷新：快速重载本地书 + 进度（不阻塞），后台再检查更新
+  Future<void> _refreshShelf() async {
+    await ref.read(libraryProvider.notifier).load();
+    await _loadProgress();
+    unawaited(_checkUpdatesAndNotify());
+  }
+
+  // 后台检查更新，完成后 SnackBar 提示
+  Future<void> _checkUpdatesAndNotify() async {
+    final n = await _checkUpdates();
+    if (n > 0 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$n 本书有更新'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  // 逐书拉目录对比章节数：首次记录基线，之后章节增多算有更新。
+  // 返回有更新的书数（漫画源复杂，暂跳过）。
+  Future<int> _checkUpdates() async {
+    final books = ref.read(libraryProvider);
+    final sp = await SharedPreferences.getInstance();
+    var updated = 0;
+    for (final b in books) {
+      if (b.type != ContentType.novel) continue;
+      final source = SourceRegistry().byId(b.sourceId);
+      if (source == null) continue;
+      try {
+        final toc =
+            await source.loadToc(b).timeout(const Duration(seconds: 15));
+        final newCount = toc.chapters.length;
+        final oldKey = 'update_count_${b.bookUrl}';
+        final oldCount = sp.getInt(oldKey);
+        if (oldCount != null && newCount > oldCount) updated++;
+        await sp.setInt(oldKey, newCount);
+      } catch (_) {}
+    }
+    return updated;
+  }
 
   Future<void> _loadProgress() async {
     final sp = await SharedPreferences.getInstance();
@@ -1265,7 +1332,8 @@ class _BookCard extends StatelessWidget {
 
     Widget cover() {
       return ClipRRect(
-        borderRadius: BorderRadius.circular(8),
+        // 与卡片 Material(10) 及发现页封面一致：四角都圆
+        borderRadius: BorderRadius.circular(10),
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -1279,7 +1347,7 @@ class _BookCard extends StatelessWidget {
                     ),
                   )
                 : CoverImage(book.cover,
-                    sourceId: book.sourceId, fit: BoxFit.contain),
+                    sourceId: book.sourceId, fit: BoxFit.cover),
             Positioned(
               left: 5,
               top: 5,

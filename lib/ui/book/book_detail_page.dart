@@ -89,7 +89,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
 
           return Glass(
             radius: 24,
-            blur: 18,
+            blur: 3,
             child: SizedBox(
             height: MediaQuery.of(sheetCtx).size.height * 0.6,
             child: Column(
@@ -252,7 +252,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
           return GlassDialog(
             child: Glass(
               radius: 20,
-              blur: 18,
+              blur: 3,
               padding: const EdgeInsets.all(20),
               child: Column(
                 mainAxisSize: MainAxisSize.min,

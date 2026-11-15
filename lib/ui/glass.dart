@@ -65,7 +65,7 @@ class GlassDialog extends StatelessWidget {
   }
 }
 
-/// 玻璃圆钮：白 0.42 填充 + 毛玻璃 blur 8 + 描边 + 投影。
+/// 玻璃圆钮：白 0.16 填充 + 毛玻璃 blur 3 + 高光描边 + 软投影。
 /// 与阅读器控制栏圆钮同款，供各页顶部图标按钮统一使用。
 class GlassRoundButton extends StatelessWidget {
   final IconData icon;
@@ -74,6 +74,9 @@ class GlassRoundButton extends StatelessWidget {
   final Color? color;
   final double iconSize;
 
+  /// 关闭投影（顶栏悬浮元素直接贴在背景上，避免出现额外暗层）。
+  final bool shadow;
+
   const GlassRoundButton({
     super.key,
     required this.icon,
@@ -81,6 +84,7 @@ class GlassRoundButton extends StatelessWidget {
     required this.onTap,
     this.color,
     this.iconSize = 20,
+    this.shadow = true,
   });
 
   @override
@@ -94,22 +98,24 @@ class GlassRoundButton extends StatelessWidget {
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             border: Border.all(
-                color: Colors.white.withValues(alpha: 0.55), width: 1),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.06),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
+                color: Colors.white.withValues(alpha: 0.4), width: 1),
+            boxShadow: shadow
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.10),
+                      blurRadius: 9,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : const [],
           ),
           child: ClipOval(
             child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+              filter: ImageFilter.blur(sigmaX: 3, sigmaY: 3),
               child: Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.42),
+                  color: Colors.white.withValues(alpha: 0.28),
                 ),
                 child: Icon(icon,
                     size: iconSize, color: color ?? Colors.grey.shade800),
@@ -131,14 +137,18 @@ class Glass extends StatelessWidget {
   final double tintOpacity;
   final Border? border;
 
+  /// 关闭投影（顶栏悬浮元素直接贴在背景上，避免出现额外暗层）。
+  final bool shadow;
+
   const Glass({
     super.key,
     required this.child,
     this.radius = 16,
     this.blur = 0,
     this.padding,
-    this.tintOpacity = 0.42,
+    this.tintOpacity = 0.28,
     this.border,
+    this.shadow = true,
   });
 
   @override
@@ -167,14 +177,16 @@ class Glass extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(radius),
         border: border ??
-            Border.all(color: Colors.white.withValues(alpha: 0.55), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+            Border.all(color: Colors.white.withValues(alpha: 0.35), width: 1),
+        boxShadow: shadow
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.10),
+                  blurRadius: 9,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : const [],
       ),
       child: inner,
     );

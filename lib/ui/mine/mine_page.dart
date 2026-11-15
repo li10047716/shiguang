@@ -173,7 +173,7 @@ class _MinePageState extends ConsumerState<MinePage> {
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Glass(
         radius: 22,
-        blur: 18,
+        blur: 3,
         padding: const EdgeInsets.all(4),
         child: Row(
           children: [
@@ -668,7 +668,7 @@ class _MinePageState extends ConsumerState<MinePage> {
       builder: (context) => GlassDialog(
         child: Glass(
         radius: 20,
-        blur: 18,
+        blur: 3,
         padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -840,7 +840,7 @@ class _MinePageState extends ConsumerState<MinePage> {
       builder: (context) => GlassDialog(
         child: Glass(
         radius: 20,
-        blur: 18,
+        blur: 3,
         padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -880,7 +880,7 @@ class _MinePageState extends ConsumerState<MinePage> {
       builder: (context) => GlassDialog(
         child: Glass(
         radius: 20,
-        blur: 18,
+        blur: 3,
         padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -946,8 +946,8 @@ class _MinePageState extends ConsumerState<MinePage> {
 
   Widget _actionBar(List<Widget> children) {
     return Glass(
-      radius: 22,
-      blur: 18,
+      radius: 50,
+      blur: 3,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: Row(children: children),
     );
@@ -1025,7 +1025,7 @@ class _MinePageState extends ConsumerState<MinePage> {
       builder: (context) => GlassDialog(
         child: Glass(
         radius: 20,
-        blur: 18,
+        blur: 3,
         padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1167,7 +1167,7 @@ class _MinePageState extends ConsumerState<MinePage> {
       context: context,
       builder: (context) => Glass(
         radius: 20,
-        blur: 18,
+        blur: 3,
         padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,

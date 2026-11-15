@@ -255,7 +255,7 @@ class _TocPageState extends State<TocPage> {
                         Expanded(
                           child: Glass(
                             radius: 20,
-                            blur: 18,
+                            blur: 3,
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 14, vertical: 2),
                             child: TextField(
@@ -281,7 +281,7 @@ class _TocPageState extends State<TocPage> {
                           const SizedBox(width: 8),
                           Glass(
                             radius: 20,
-                            blur: 18,
+                            blur: 3,
                             child: TextButton(
                               onPressed: _jumpToLastRead,
                               child: const Text('上次读'),
