@@ -1081,7 +1081,8 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     final keys = sp.getKeys().where((k) => k.startsWith(_progressPrefix));
     final map = <String, int>{};
     for (final k in keys) {
-      final v = sp.getInt(k);
+      final raw = sp.get(k);
+      final v = raw is int ? raw : null;
       if (v != null) {
         map[k.substring(_progressPrefix.length)] = v;
       }
@@ -1089,7 +1090,8 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     final tkeys = sp.getKeys().where((k) => k.startsWith(_progressTimePrefix));
     final tmap = <String, int>{};
     for (final k in tkeys) {
-      final v = sp.getInt(k);
+      final raw = sp.get(k);
+      final v = raw is int ? raw : null;
       if (v != null) tmap[k.substring(_progressTimePrefix.length)] = v;
     }
     final ttkeys =

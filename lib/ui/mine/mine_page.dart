@@ -97,7 +97,8 @@ class _MinePageState extends ConsumerState<MinePage> {
     final keys = sp.getKeys().where((k) => k.startsWith(_progressPrefix));
     final map = <String, int>{};
     for (final k in keys) {
-      final v = sp.getInt(k);
+      final raw = sp.get(k);
+      final v = raw is int ? raw : null;
       if (v != null) map[k.substring(_progressPrefix.length)] = v;
     }
     if (mounted) setState(() => _progress = map);

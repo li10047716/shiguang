@@ -72,15 +72,17 @@ class _HomeShellState extends State<HomeShell> {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Stack(
         children: [
-          // 液态滑动指示器：选中高亮像液体一样弹性滑到新选中项
-          IgnorePointer(
-            child: AnimatedPositioned(
-              duration: const Duration(milliseconds: 340),
-              curve: Curves.easeOutBack,
-              left: _index * (itemW + 4),
-              top: 4,
-              bottom: 4,
-              width: itemW,
+          // 液态滑动指示器：选中高亮像液体一样弹性滑到新选中项。
+          // 注意：AnimatedPositioned 必须直接挂在 Stack 下（ParentDataWidget），
+          // 不能再用 IgnorePointer 等包裹，否则 applyParentData 强转 StackParentData 失败。
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 340),
+            curve: Curves.easeOutBack,
+            left: _index * (itemW + 4),
+            top: 4,
+            bottom: 4,
+            width: itemW,
+            child: IgnorePointer(
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 4),
                 decoration: BoxDecoration(
