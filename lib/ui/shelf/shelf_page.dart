@@ -56,7 +56,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   static const _sortNames = ['最近阅读', '书名'];
 
   // 顶部标题栏高度（列表顶部预留，滚动时卡片从标题下经过）
-  static const double _headerH = 76;
+  static const double _headerH = 96;
   // 标题栏毛玻璃：列表滚过标题区时淡入，模糊背后卡片
   final ScrollController _scrollCtrl = ScrollController();
   bool _showBar = false;
@@ -97,47 +97,49 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
       onKeyEvent: _onKey,
       child: Scaffold(
       backgroundColor: Colors.transparent,
-      body: Stack(
-        children: [
-          // 列表：顶部预留标题栏高度，滚动时卡片从标题下经过
-          Positioned.fill(
-            child: Padding(
-              padding: const EdgeInsets.only(top: _headerH),
-              child: books.isEmpty ? _empty() : _grid(books),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            // 列表：顶部预留标题栏高度，滚动时卡片从标题下经过
+            Positioned.fill(
+              child: Padding(
+                padding: const EdgeInsets.only(top: _headerH),
+                child: books.isEmpty ? _empty() : _grid(books),
+              ),
             ),
-          ),
-          // 标题栏毛玻璃背景（滚动时淡入，模糊经过的卡片）
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: IgnorePointer(
-              child: AnimatedOpacity(
-                opacity: _showBar ? 1 : 0,
-                duration: const Duration(milliseconds: 180),
-                child: ClipRect(
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                    child: Container(
-                      height: _headerH,
-                      color: Colors.white.withValues(alpha: 0.42),
+            // 标题栏毛玻璃背景（滚动时淡入，模糊经过的卡片）
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                child: AnimatedOpacity(
+                  opacity: _showBar ? 1 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  child: ClipRect(
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                      child: Container(
+                        height: _headerH,
+                        color: Colors.white.withValues(alpha: 0.42),
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-          // 标题栏（文字+胶囊常显，不随毛玻璃淡出）
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: _header(),
-          ),
-        ],
+            // 标题栏（文字+胶囊常显，不随毛玻璃淡出）
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: _header(),
+            ),
+          ],
+        ),
       ),
-      ),
-    );
+    ),
+  );
   }
 
   /// Ctrl+F 打开搜索
@@ -729,7 +731,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   /// 独立玻璃胶囊/圆钮：悬浮半透明白 + 高光描边（不再用整条玻璃容器）。
   Widget _chip({required Widget child, double alpha = 0.35, bool bordered = true}) {
     return Container(
-      margin: const EdgeInsets.only(left: 8),
+      margin: const EdgeInsets.only(left: 4),
       decoration: bordered
           ? BoxDecoration(
               color: Colors.white.withValues(alpha: alpha),
@@ -753,7 +755,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
         Glass(
           radius: 22,
           blur: 18,
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -842,6 +844,8 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
           bordered: false,
           child: IconButton(
             tooltip: _listView ? '网格视图' : '列表视图',
+            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+            padding: EdgeInsets.zero,
             icon: Icon(_listView ? Icons.grid_view : Icons.view_list,
                 size: 22, color: Colors.grey.shade800),
             onPressed: () => setState(() => _listView = !_listView),
@@ -852,6 +856,8 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
           bordered: false,
           child: IconButton(
             tooltip: '搜索',
+            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+            padding: EdgeInsets.zero,
             icon: Icon(Icons.search, size: 22, color: Colors.grey.shade800),
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const SearchPage()),

@@ -267,12 +267,14 @@ class _DiscoverPageState extends State<DiscoverPage>
       backgroundColor: Colors.transparent,
       body: _sources.isEmpty
           ? const Center(child: Text('暂无支持发现的书源'))
-          : Column(
-              children: [
-                _toolbar(),
-                // 分类行（榜单/分类 + 芯片）与书籍一体滚动（在 _body 内）
-                Expanded(child: _body()),
-              ],
+          : SafeArea(
+              child: Column(
+                children: [
+                  _toolbar(),
+                  // 分类行（榜单/分类 + 芯片）与书籍一体滚动（在 _body 内）
+                  Expanded(child: _body()),
+                ],
+              ),
             ),
     );
   }

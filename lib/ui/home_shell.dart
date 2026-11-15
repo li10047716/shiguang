@@ -63,50 +63,73 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Widget _bottomNav() {
+    const double itemW = 56; // 每项宽（图标+文字居中）
     final inactiveColor = Colors.grey.shade600;
     // 液态玻璃椭圆胶囊：包住三个导航按钮
     return Glass(
       radius: 24,
       blur: 18,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Stack(
         children: [
-        for (var i = 0; i < _items.length; i++)
-          InkWell(
-            borderRadius: BorderRadius.circular(16),
-            onTap: () => setState(() => _index = i),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 16),
-              decoration: BoxDecoration(
-                color: i == _index
-                    ? _activeColor.withValues(alpha: 0.14)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    i == _index ? _items[i].$2 : _items[i].$1,
-                    color: i == _index ? _activeColor : inactiveColor,
-                    size: 22,
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    _items[i].$3,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: i == _index
-                          ? FontWeight.w600
-                          : FontWeight.w400,
-                      color: i == _index ? _activeColor : inactiveColor,
-                    ),
-                  ),
-                ],
+          // 液态滑动指示器：选中高亮像液体一样弹性滑到新选中项
+          IgnorePointer(
+            child: AnimatedPositioned(
+              duration: const Duration(milliseconds: 340),
+              curve: Curves.easeOutBack,
+              left: _index * (itemW + 4),
+              top: 4,
+              bottom: 4,
+              width: itemW,
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: _activeColor.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(16),
+                ),
               ),
             ),
+          ),
+          // 三项按钮（内容居中；选中高亮由滑动指示器提供）
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var i = 0; i < _items.length; i++) ...[
+                if (i > 0) const SizedBox(width: 4),
+                InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => setState(() => _index = i),
+                  child: SizedBox(
+                    width: itemW,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            i == _index ? _items[i].$2 : _items[i].$1,
+                            color: i == _index ? _activeColor : inactiveColor,
+                            size: 22,
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            _items[i].$3,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: i == _index
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                              color:
+                                  i == _index ? _activeColor : inactiveColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
       ),

@@ -58,7 +58,7 @@ class _ReaderPageState extends State<ReaderPage>
 
   // ---- 阅读体验增强 ----
   double _lineHeight = 1.9; // 行距
-  double _paraGap = 1.0; // 段距（段落间距，单位 = 行高倍数，0-3 连续）
+  double _paraGap = 0.5; // 段距（段落间距，单位 = 行高倍数，0-3 连续）
   String? _fontFamily; // 字体（null = 系统默认）
   double _brightness = 1.0; // 亮度（1 = 无遮罩，越低越暗）
   int _turnMode = 0; // 翻页效果：0 左右平移 / 1 上下平移 / 2 上下滑动 / 3 仿真翻页
@@ -166,7 +166,7 @@ class _ReaderPageState extends State<ReaderPage>
       _lineHeight = sp.getDouble('reader_line_height') ?? 1.9;
       // 旧版本存的是 int，getDouble 可能类型不符 → 手动兼容转换
       final pg = sp.get('reader_para_gap');
-      _paraGap = pg is int ? pg.toDouble() : (pg is double ? pg : 1.0);
+      _paraGap = pg is int ? pg.toDouble() : (pg is double ? pg : 0.5);
       final fi = sp.getInt('reader_font_index') ?? 0;
       _fontFamily =
           ReaderPrefs.fontFamilies[fi.clamp(0, ReaderPrefs.fontFamilies.length - 1)];
@@ -348,7 +348,6 @@ class _ReaderPageState extends State<ReaderPage>
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      showDragHandle: true, // 顶部下拉手柄，明确可关闭
       backgroundColor: Colors.transparent,
       barrierColor: Colors.transparent, // 背景不变暗
       builder: (context) => StatefulBuilder(
@@ -373,11 +372,6 @@ class _ReaderPageState extends State<ReaderPage>
                         child: Text('阅读设置',
                             style: TextStyle(
                                 fontSize: 16, fontWeight: FontWeight.w700)),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        tooltip: '关闭',
-                        onPressed: () => Navigator.pop(context),
                       ),
                     ],
                   ),
@@ -536,7 +530,6 @@ class _ReaderPageState extends State<ReaderPage>
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      showDragHandle: true,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.transparent,
       builder: (context) => StatefulBuilder(
@@ -559,11 +552,6 @@ class _ReaderPageState extends State<ReaderPage>
                         child: Text('背景设置',
                             style: TextStyle(
                                 fontSize: 16, fontWeight: FontWeight.w700)),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        tooltip: '关闭',
-                        onPressed: () => Navigator.pop(context),
                       ),
                     ],
                   ),
@@ -761,7 +749,6 @@ class _ReaderPageState extends State<ReaderPage>
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      showDragHandle: true,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.transparent,
       builder: (context) => StatefulBuilder(
@@ -785,16 +772,10 @@ class _ReaderPageState extends State<ReaderPage>
                             style: TextStyle(
                                 fontSize: 16, fontWeight: FontWeight.w700)),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        tooltip: '关闭',
-                        onPressed: () => Navigator.pop(context),
-                      ),
                     ],
                   ),
                   _sheetSlider('字号', _fontSize, 14, 28,
                       label: _fontSize.toStringAsFixed(0),
-                      divisions: 14,
                       onChanged: (v) async {
                     setState(() => _fontSize = v);
                     setSheet(() => _fontSize = v);
@@ -803,7 +784,6 @@ class _ReaderPageState extends State<ReaderPage>
                   }),
                   _sheetSlider('行距', _lineHeight, 1.0, 2.2,
                       label: _lineHeight.toStringAsFixed(2),
-                      divisions: 12,
                       onChanged: (v) async {
                     setState(() => _lineHeight = v);
                     setSheet(() => _lineHeight = v);
@@ -812,7 +792,6 @@ class _ReaderPageState extends State<ReaderPage>
                   }),
                   _sheetSlider('段距', _paraGap, 0, 3,
                       label: _paraGap.toStringAsFixed(1),
-                      divisions: 30,
                       onChanged: (v) async {
                     setState(() => _paraGap = v);
                     setSheet(() => _paraGap = v);
@@ -912,9 +891,7 @@ class _ReaderPageState extends State<ReaderPage>
   /// 设置弹窗里的滑杆行（标题 + 滑杆）。
   /// [divisions] 非空时滑杆按档位吸附，并拖动时显示数值气泡 [label]。
   Widget _sheetSlider(String title, double value, double min, double max,
-      {required String label,
-      int? divisions,
-      required ValueChanged<double> onChanged}) {
+      {required String label, required ValueChanged<double> onChanged}) {
     return Row(
       children: [
         Text(title),
@@ -923,10 +900,16 @@ class _ReaderPageState extends State<ReaderPage>
             value: value.clamp(min, max),
             min: min,
             max: max,
-            divisions: divisions,
-            label: label,
+            // 连续滑杆：不设 divisions，可自由拖动任意取值；
+            // 当前值实时显示在右侧文字
             onChanged: onChanged,
           ),
+        ),
+        SizedBox(
+          width: 44,
+          child: Text(label,
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontSize: 13, color: Colors.grey)),
         ),
       ],
     );
@@ -1956,7 +1939,7 @@ class _ReaderPageState extends State<ReaderPage>
   /// 上下滑动：整章连续滚动，不分页（页脚显示滚动百分比）
   Widget _buildScrollViewer(Color fg) {
     final paras = _decoratedParas(_content?.paras ?? const <String>[]);
-    final gapPx = (1 + _paraGap) * _fontSize * _lineHeight;
+    final gapPx = _paraGap * _fontSize * _lineHeight;
     final safeTop = MediaQuery.of(context).padding.top;
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -2150,8 +2133,8 @@ class _ReaderPageState extends State<ReaderPage>
       _reflowKey = null;
       return;
     }
-    // 段距像素 = (基础 1 行 + 调节 _paraGap) × 行高
-    final gapPx = (1 + _paraGap) * _fontSize * _lineHeight;
+    // 段距像素 = 段距 × 行高（0 = 无间距，1 = 一行高）
+    final gapPx = _paraGap * _fontSize * _lineHeight;
     final paras = _decoratedParas(c.paras);
     // 每章第一页的大号标题：预留其高度，正文从标题下方开始
     final title = _chapterTitle;

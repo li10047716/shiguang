@@ -1210,7 +1210,7 @@ class _ReaderSettingsPageState extends State<_ReaderSettingsPage> {
   double _font = 18;
   int _bg = 0;
   double _line = 1.9;
-  double _para = 1.0;
+  double _para = 0.5;
   double _bright = 1.0;
   int _turn = 0;
   bool _autoNight = true;
@@ -1229,7 +1229,7 @@ class _ReaderSettingsPageState extends State<_ReaderSettingsPage> {
       _font = sp.getDouble('reader_font_size') ?? 18;
       _line = sp.getDouble('reader_line_height') ?? 1.9;
       final pg = sp.get('reader_para_gap');
-      _para = pg is int ? pg.toDouble() : (pg is double ? pg : 1.0);
+      _para = pg is int ? pg.toDouble() : (pg is double ? pg : 0.5);
       _bright = sp.getDouble('reader_brightness') ?? 1.0;
       _turn = sp.getInt('reader_turn_mode') ?? 0;
       _autoNight = sp.getBool('reader_auto_night') ?? true;
@@ -1258,17 +1258,27 @@ class _ReaderSettingsPageState extends State<_ReaderSettingsPage> {
   }
 
   Widget _sliderCard(String title, double value, double min, double max,
-      String label, ValueChanged<double> onChanged,
-      {int? divisions}) {
+      String label, ValueChanged<double> onChanged) {
     return _card(
         title,
-        Slider(
-          value: value.clamp(min, max),
-          min: min,
-          max: max,
-          divisions: divisions,
-          label: label,
-          onChanged: onChanged,
+        Row(
+          children: [
+            Expanded(
+              child: Slider(
+                value: value.clamp(min, max),
+                min: min,
+                max: max,
+                // 连续滑杆：不设 divisions，自由拖动；值实时显示在右侧
+                onChanged: onChanged,
+              ),
+            ),
+            SizedBox(
+              width: 44,
+              child: Text(label,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(fontSize: 13, color: Colors.grey)),
+            ),
+          ],
         ));
   }
 
@@ -1309,21 +1319,21 @@ class _ReaderSettingsPageState extends State<_ReaderSettingsPage> {
                               setState(() => _font = v);
                               final sp = await SharedPreferences.getInstance();
                               await sp.setDouble('reader_font_size', v);
-                            }, divisions: 14),
+                            }),
                             const SizedBox(height: 12),
                             _sliderCard('行距', _line, 1.4, 2.4,
                                 _line.toStringAsFixed(2), (v) async {
                               setState(() => _line = v);
                               final sp = await SharedPreferences.getInstance();
                               await sp.setDouble('reader_line_height', v);
-                            }, divisions: 10),
+                            }),
                             const SizedBox(height: 12),
                             _sliderCard('段距', _para, 0, 3,
                                 _para.toStringAsFixed(1), (v) async {
                               setState(() => _para = v);
                               final sp = await SharedPreferences.getInstance();
                               await sp.setDouble('reader_para_gap', v);
-                            }, divisions: 30),
+                            }),
                             const SizedBox(height: 12),
                             _card(
                                 '阅读背景',

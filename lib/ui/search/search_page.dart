@@ -194,12 +194,14 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Stack(
-        children: [
-          const Positioned.fill(child: GlassBackground()),
-          SafeArea(
+    return Stack(
+      children: [
+        // 全屏背景放最底层：键盘弹出时 body 缩高，背景仍铺满整窗，
+        // 避免键盘四周露出黑色块
+        const Positioned.fill(child: GlassBackground()),
+        Scaffold(
+          backgroundColor: Colors.transparent,
+          body: SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
               child: Column(
@@ -317,8 +319,8 @@ class _SearchPageState extends State<SearchPage> {
               ),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
