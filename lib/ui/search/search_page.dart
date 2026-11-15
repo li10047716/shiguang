@@ -90,11 +90,16 @@ class _SearchPageState extends State<SearchPage> {
 
   /// 三点菜单：选择参与聚合搜索的书源（存本地，聚合器只搜选中的）
   Future<void> _showSourcePicker() async {
+    // 只列出已启用的书源，勾选决定哪些参与本次搜索
     final sources = SourceRegistry().enabled;
     final sp = await SharedPreferences.getInstance();
     if (!mounted) return;
-    var selected =
-        (sp.getStringList('search_source_ids') ?? const []).toList();
+    // 从未设置过：默认全选所有启用源（避免首次保存空列表导致永远无结果）；
+    // 设置过：严格按上次勾选
+    final saved = sp.getStringList('search_source_ids');
+    var selected = saved != null
+        ? saved.toList()
+        : sources.map((s) => s.sourceId).toList();
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,

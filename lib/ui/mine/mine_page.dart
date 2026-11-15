@@ -631,17 +631,15 @@ class _MinePageState extends ConsumerState<MinePage> {
                           ],
                         ),
                         subtitle: Text(
-                          isBuiltin ? '内置书源（始终启用）' : rule.baseUrl,
+                          isBuiltin ? '内置书源（可启停）' : rule.baseUrl,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        value: isBuiltin ? true : rule.enabled,
-                        onChanged: isBuiltin
-                            ? null
-                            : (v) async {
-                                await repo.toggle(s.sourceId, v);
-                                setState(() {});
-                              },
+                        value: SourceRegistry().isEnabled(s.sourceId),
+                        onChanged: (v) async {
+                          await SourceRegistry().toggleEnabled(s.sourceId, v);
+                          setState(() {});
+                        },
                       ),
                     ),
                     if (isCustom)

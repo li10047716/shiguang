@@ -5,6 +5,8 @@
 /// 对应 shiguang 的 `core.book()/chapter()` 按书号前缀分派。
 library;
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/book_source.dart';
 import 'builtin/builtin_sources.dart';
 import 'native/ali.dart';
@@ -25,6 +27,7 @@ class SourceRegistry {
   SourceRegistry._() {
     _loadRuleSources();
     _loadNativeSources();
+    _loadHardEnabled();
   }
 
   static final SourceRegistry _instance = SourceRegistry._();
@@ -32,6 +35,10 @@ class SourceRegistry {
   factory SourceRegistry() => _instance;
 
   final List<NovelSource> _sources = [];
+
+  /// 硬编码源（native/）的禁用集合：sourceId -> 是否禁用。
+  /// 默认启用；书源管理里可开关，持久化到 SharedPreferences。
+  final Map<String, bool> _hardDisabled = {};
 
   /// 规则引擎源：从 JSON 书源仓库加载
   void _loadRuleSources() {
@@ -55,20 +62,55 @@ class SourceRegistry {
     _sources.add(HuadudmSource());
   }
 
+  /// 异步加载硬编码源的启停状态（默认启用，不阻塞启动）
+  void _loadHardEnabled() {
+    SharedPreferences.getInstance().then((sp) {
+      for (final s in _sources) {
+        if (SourceRepository().byId(s.sourceId) == null) {
+          final enabled = sp.getBool('source_enabled_${s.sourceId}') ?? true;
+          if (!enabled) _hardDisabled[s.sourceId] = true;
+        }
+      }
+    });
+  }
+
   /// 全部书源
   List<NovelSource> get all => List.unmodifiable(_sources);
 
-  /// 是否启用：规则源看 SourceRepository 的 enabled；硬编码源始终启用
+  /// 是否启用：规则源看 SourceRepository 的 enabled；硬编码源读持久化状态
   bool _isEnabled(NovelSource s) {
     final bs = SourceRepository().byId(s.sourceId);
-    return bs == null || bs.enabled;
+    if (bs != null) return bs.enabled;
+    return !(_hardDisabled[s.sourceId] ?? false);
+  }
+
+  /// 公开的启用状态查询（供书源管理界面用，同步）
+  bool isEnabled(String sourceId) {
+    final bs = SourceRepository().byId(sourceId);
+    if (bs != null) return bs.enabled;
+    return !(_hardDisabled[sourceId] ?? false);
+  }
+
+  /// 切换书源启用状态（持久化）。规则源走 SourceRepository，硬编码源走本地 prefs。
+  Future<void> toggleEnabled(String sourceId, bool enabled) async {
+    if (SourceRepository().byId(sourceId) != null) {
+      await SourceRepository().toggle(sourceId, enabled);
+      return;
+    }
+    final sp = await SharedPreferences.getInstance();
+    await sp.setBool('source_enabled_$sourceId', enabled);
+    if (enabled) {
+      _hardDisabled.remove(sourceId);
+    } else {
+      _hardDisabled[sourceId] = true;
+    }
   }
 
   /// 启用中的全部书源（任意类型）
   List<NovelSource> get enabled =>
       _sources.where(_isEnabled).toList();
 
-  /// 启用中的某类型书源（硬编码源始终启用）
+  /// 启用中的某类型书源
   List<NovelSource> enabledOfType(ContentType type) =>
       _sources.where((s) => s.type == type && _isEnabled(s)).toList();
 

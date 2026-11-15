@@ -90,18 +90,20 @@ class SearchAggregator extends StateNotifier<AggregateSearchState> {
 
   SearchAggregator() : super(const AggregateSearchState());
 
-  /// 启动一次聚合搜索（默认全部启用书源，若在搜索页选了部分书源则只搜那些）
+  /// 启动一次聚合搜索。
+  /// 从未设置过书源勾选：搜全部启用源。
+  /// 已设置过：严格只搜勾选的书源，没勾选的源不返回结果（空勾选 = 无结果）。
   void search(String keyword) {
-    final all = SourceRegistry().enabled;
     SharedPreferences.getInstance().then((sp) {
       final ids = sp.getStringList(_selectedSourcesKey);
-      var sources = all;
-      if (ids != null && ids.isNotEmpty) {
-        final filtered =
-            all.where((s) => ids.contains(s.sourceId)).toList();
-        if (filtered.isNotEmpty) sources = filtered;
+      if (ids == null) {
+        _startSearch(keyword, SourceRegistry().enabled);
+        return;
       }
-      _startSearch(keyword, sources);
+      final enabled = SourceRegistry().enabled;
+      final filtered =
+          enabled.where((s) => ids.contains(s.sourceId)).toList();
+      _startSearch(keyword, filtered);
     });
   }
 

@@ -62,6 +62,13 @@ class _ReaderPageState extends State<ReaderPage>
   bool _indent = true; // 段首缩进
   bool _justify = false; // 两端对齐
   int _wallpaper = 0; // 背景壁纸（0 = 无）
+  double _pagePadH = 20; // 正文左右页边距（可调）
+  // 点击区域动作：0 上一页 / 1 下一页 / 2 呼出菜单 / 3 目录 / 4 无
+  int _tapLeft = 0; // 点左 1/3
+  int _tapMiddle = 2; // 点中间
+  int _tapRight = 1; // 点右 1/3
+  bool _immersive = false; // 沉浸阅读（隐藏状态栏）
+  int _animMs = 220; // 翻页动画时长（毫秒）
 
   // 覆盖翻页动画
   late final AnimationController _coverAnim;
@@ -124,7 +131,7 @@ class _ReaderPageState extends State<ReaderPage>
     super.initState();
     _index = widget.initialIndex;
     _coverAnim = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 240));
+        vsync: this, duration: Duration(milliseconds: _animMs));
     _loadSettings();
     _loadChapter(_index);
   }
@@ -137,6 +144,8 @@ class _ReaderPageState extends State<ReaderPage>
     _tocController.dispose();
     _coverAnim.dispose();
     _tick(); // 结算阅读时长
+    // 退出阅读器：恢复系统状态栏显示
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
 
@@ -168,8 +177,19 @@ class _ReaderPageState extends State<ReaderPage>
       _indent = sp.getBool('reader_indent') ?? true;
       _justify = sp.getBool('reader_justify') ?? false;
       _wallpaper = sp.getInt('reader_wallpaper') ?? 0;
+      _pagePadH = sp.getDouble('reader_page_pad') ?? 20;
+      _tapLeft = sp.getInt('reader_tap_left') ?? 0;
+      _tapMiddle = sp.getInt('reader_tap_middle') ?? 2;
+      _tapRight = sp.getInt('reader_tap_right') ?? 1;
+      _immersive = sp.getBool('reader_immersive') ?? false;
+      _animMs = sp.getInt('reader_anim_ms') ?? 220;
     });
     if (_bgSound) _startBgSound();
+    // 沉浸阅读：隐藏系统状态栏
+    if (_immersive) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    }
+    _coverAnim.duration = Duration(milliseconds: _animMs);
   }
 
   Future<void> _startBgSound() async {
@@ -303,6 +323,49 @@ class _ReaderPageState extends State<ReaderPage>
   void _next() => _loadChapter(_index + 1);
   void _prev() => _loadChapter(_index - 1);
 
+  /// 点击区域动作下拉行：左/中/右 1/3 各自配置动作。
+  Widget _tapZoneRow(String label, int current, String key,
+      void Function(void Function()) setSheet) {
+    return Row(
+      children: [
+        Text(label),
+        const Spacer(),
+        DropdownButton<int>(
+          value: current,
+          isDense: true,
+          items: const [
+            DropdownMenuItem(value: 0, child: Text('上一页')),
+            DropdownMenuItem(value: 1, child: Text('下一页')),
+            DropdownMenuItem(value: 2, child: Text('呼出菜单')),
+            DropdownMenuItem(value: 3, child: Text('目录')),
+            DropdownMenuItem(value: 4, child: Text('无')),
+          ],
+          onChanged: (v) async {
+            if (v == null) return;
+            void apply() {
+              switch (key) {
+                case 'reader_tap_left':
+                  _tapLeft = v;
+                  break;
+                case 'reader_tap_middle':
+                  _tapMiddle = v;
+                  break;
+                case 'reader_tap_right':
+                  _tapRight = v;
+                  break;
+              }
+            }
+
+            setState(apply);
+            setSheet(apply);
+            final sp = await SharedPreferences.getInstance();
+            await sp.setInt(key, v);
+          },
+        ),
+      ],
+    );
+  }
+
   Future<void> _showSettings() async {
     await showModalBottomSheet(
       context: context,
@@ -352,19 +415,6 @@ class _ReaderPageState extends State<ReaderPage>
                   onTap: () {
                     Navigator.pop(context);
                     _toggleBookmark();
-                  },
-                ),
-                // 字体设置入口（字号/行距/段距/字体移入子面板）
-                ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading:
-                      const Icon(Icons.text_fields, color: Color(0xFF3E8EF7)),
-                  title: const Text('字体设置'),
-                  trailing: const Icon(Icons.chevron_right, size: 20),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _showFontSettings();
                   },
                 ),
                 const SizedBox(height: 12),
@@ -490,6 +540,53 @@ class _ReaderPageState extends State<ReaderPage>
                         setSheet(() => _justify = v);
                         final sp = await SharedPreferences.getInstance();
                         await sp.setBool('reader_justify', v);
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                // 页边距（正文左右留白）
+                _sheetSlider('页边距', _pagePadH, 0, 40,
+                    label: '${_pagePadH.round()}',
+                    onChanged: (v) async {
+                  setState(() => _pagePadH = v);
+                  setSheet(() => _pagePadH = v);
+                  final sp = await SharedPreferences.getInstance();
+                  await sp.setDouble('reader_page_pad', v);
+                }),
+                // 翻页动画时长
+                _sheetSlider('翻页动画', _animMs.toDouble(), 100, 600,
+                    label: '$_animMs ms',
+                    onChanged: (v) async {
+                  setState(() => _animMs = v.round());
+                  setSheet(() => _animMs = v.round());
+                  _coverAnim.duration = Duration(milliseconds: _animMs);
+                  final sp = await SharedPreferences.getInstance();
+                  await sp.setInt('reader_anim_ms', _animMs);
+                }),
+                // 点击区域动作
+                _tapZoneRow('点左 1/3', _tapLeft, 'reader_tap_left', setSheet),
+                _tapZoneRow('点中 1/3', _tapMiddle, 'reader_tap_middle', setSheet),
+                _tapZoneRow('点右 1/3', _tapRight, 'reader_tap_right', setSheet),
+                // 沉浸阅读（隐藏状态栏）
+                Row(
+                  children: [
+                    const Text('沉浸阅读'),
+                    const Spacer(),
+                    Switch(
+                      value: _immersive,
+                      onChanged: (v) async {
+                        setState(() => _immersive = v);
+                        setSheet(() => _immersive = v);
+                        final sp = await SharedPreferences.getInstance();
+                        await sp.setBool('reader_immersive', v);
+                        if (v) {
+                          SystemChrome.setEnabledSystemUIMode(
+                              SystemUiMode.immersiveSticky);
+                        } else {
+                          SystemChrome.setEnabledSystemUIMode(
+                              SystemUiMode.edgeToEdge);
+                        }
                       },
                     ),
                   ],
@@ -1110,7 +1207,7 @@ class _ReaderPageState extends State<ReaderPage>
     );
   }
 
-  /// 点击：左/右 1/3 翻页（章内翻屏，翻到章首/章尾再切章），中间切换控制栏显隐。
+  /// 点击：左/中/右 1/3 区域各自执行配置动作（翻页/呼出菜单/目录/无）。
   void _handleTap(TapUpDetails d) {
     // 菜单显示时：第一下任意位置点击都先隐藏菜单，不翻页
     if (_showControls) {
@@ -1120,12 +1217,32 @@ class _ReaderPageState extends State<ReaderPage>
     final w = MediaQuery.of(context).size.width;
     final x = d.localPosition.dx;
     if (x < w / 3) {
-      _prevPage();
+      _runTapAction(_tapLeft);
     } else if (x > w * 2 / 3) {
-      _nextPage();
+      _runTapAction(_tapRight);
     } else {
-      // 菜单隐藏时：点中间呼出菜单
-      setState(() => _showControls = true);
+      _runTapAction(_tapMiddle);
+    }
+  }
+
+  /// 执行点击区域动作：0 上一页 / 1 下一页 / 2 呼出菜单 / 3 目录 / 4 无。
+  void _runTapAction(int action) {
+    switch (action) {
+      case 0:
+        _prevPage();
+        break;
+      case 1:
+        _nextPage();
+        break;
+      case 2:
+        setState(() => _showControls = true);
+        break;
+      case 3:
+        _showControls = false;
+        _showToc();
+        break;
+      case 4:
+        break; // 无动作
     }
   }
 
@@ -1141,7 +1258,7 @@ class _ReaderPageState extends State<ReaderPage>
     }
     if (_pageIndex < _pages.length - 1) {
       _pageController.nextPage(
-          duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
+          duration: Duration(milliseconds: _animMs), curve: Curves.easeOut);
     } else {
       _pendingPage = 0;
       _next();
@@ -1160,7 +1277,7 @@ class _ReaderPageState extends State<ReaderPage>
     }
     if (_pageIndex > 0) {
       _pageController.previousPage(
-          duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
+          duration: Duration(milliseconds: _animMs), curve: Curves.easeOut);
     } else {
       _pendingPage = 1 << 30; // 定位到最后一屏
       _prev();
@@ -1217,12 +1334,14 @@ class _ReaderPageState extends State<ReaderPage>
           ],
         ),
         const SizedBox(height: 12),
-        // 圆钮：目录 / 设置（独立玻璃圆钮）
+        // 圆钮：目录 / 字体 / 设置（独立玻璃圆钮，同级别）
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             _roundBtn(Icons.menu, '目录', _showToc),
-            const SizedBox(width: 56),
+            const SizedBox(width: 40),
+            _roundBtn(Icons.text_fields, '字体', _showFontSettings),
+            const SizedBox(width: 40),
             _roundBtn(Icons.settings, '设置', _showSettings),
           ],
         ),
@@ -1380,7 +1499,6 @@ class _ReaderPageState extends State<ReaderPage>
 
   // ---------- 小说分页（左右翻页 + 本章进度） ----------
 
-  static const double _pagePadH = 20;
   static const double _pagePadV = 24;
   /// 页眉章节名 + 间距 占用的高度（正文从其下方开始）
   static const double _headerH = 24;

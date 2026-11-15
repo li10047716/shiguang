@@ -30,6 +30,9 @@ on:
 jobs:
   build-ios:
     runs-on: macos-15
+    # 允许创建/覆盖 GitHub Release（上传 ipa 供直接下载）
+    permissions:
+      contents: write
     # secrets 上下文不能直接在 if 里用，先经 job env 暴露（env 里引用 secrets 合法）
     env:
       IOS_SIGN: ${{ secrets.IOS_SIGN }}
@@ -93,12 +96,22 @@ jobs:
           zip -ry shiguang-unsigned.ipa Payload
           ls -lh shiguang-unsigned.ipa
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-build
-          path: |
-            shiguang-unsigned.ipa
-            build/ios/ipa/*.ipa
-          if-no-files-found: warn
-# retry-trigger 20261115
+      # 上传到 GitHub Release——附件下载是原始 .ipa 文件（GitHub Actions artifact
+      # 下载必然打包成 zip，所以改用 Release 让用户直接拿到 .ipa）。
+      - name: Upload IPA to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest-ipa --cleanup-tag --yes 2>/dev/null || true
+          if [ -f shiguang-unsigned.ipa ]; then
+            gh release create latest-ipa shiguang-unsigned.ipa \
+              --title "悦读 iOS IPA" \
+              --notes "Sideloadly 用 Apple ID 自签。下载附件即 .ipa 文件。"
+          elif ls build/ios/ipa/*.ipa >/dev/null 2>&1; then
+            gh release create latest-ipa build/ios/ipa/*.ipa \
+              --title "悦读 iOS IPA（签名）" \
+              --notes "已签名 ipa。下载附件即 .ipa 文件。"
+          else
+            echo "未找到 ipa 文件"; exit 1
+          fi
+          gh release view latest-ipa --json assets --jq '.assets[].url'

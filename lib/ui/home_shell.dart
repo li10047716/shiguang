@@ -64,10 +64,14 @@ class _HomeShellState extends State<HomeShell> {
 
   Widget _bottomNav() {
     final inactiveColor = Colors.grey.shade600;
-    // 无底框：图标+文字直接悬浮（不遮内容）
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
+    // 液态玻璃椭圆胶囊：包住三个导航按钮
+    return Glass(
+      radius: 24,
+      blur: 18,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
         for (var i = 0; i < _items.length; i++)
           InkWell(
             borderRadius: BorderRadius.circular(16),
@@ -104,7 +108,8 @@ class _HomeShellState extends State<HomeShell> {
               ),
             ),
           ),
-      ],
+        ],
+      ),
     );
   }
 }

@@ -245,8 +245,7 @@ class _DiscoverPageState extends State<DiscoverPage>
           : Column(
               children: [
                 _toolbar(),
-                _sectionTabs(),
-                _chips(),
+                // 分类行（榜单/分类 + 芯片）与书籍一体滚动（在 _body 内）
                 Expanded(child: _body()),
               ],
             ),
@@ -290,19 +289,24 @@ class _DiscoverPageState extends State<DiscoverPage>
     return GestureDetector(
       key: _sourceKey,
       onTap: _toggleSourceMenu,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.menu_book, size: 16, color: Color(0xFFE5A13A)),
-          const SizedBox(width: 6),
-          Text(s.sourceName,
-              style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey.shade800)),
-          Icon(Icons.arrow_drop_down,
-              size: 20, color: Colors.grey.shade800),
-        ],
+      child: Glass(
+        radius: 20,
+        blur: 18,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.menu_book, size: 16, color: Color(0xFFE5A13A)),
+            const SizedBox(width: 6),
+            Text(s.sourceName,
+                style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade800)),
+            Icon(Icons.arrow_drop_down,
+                size: 20, color: Colors.grey.shade800),
+          ],
+        ),
       ),
     );
   }
@@ -544,12 +548,15 @@ class _DiscoverPageState extends State<DiscoverPage>
           : const Center(child: Text('暂无内容'));
     }
     final isMobile = MediaQuery.of(context).size.width < 600;
-    return Column(
-      children: [
-        Expanded(
-          child: GridView.builder(
-            controller: _scrollCtrl,
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+    // 分类行与书籍一体滚动（分类不固定，随列表滚动）
+    return CustomScrollView(
+      controller: _scrollCtrl,
+      slivers: [
+        SliverToBoxAdapter(child: _sectionTabs()),
+        SliverToBoxAdapter(child: _chips()),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+          sliver: SliverGrid(
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               // 手机屏窄：横向卡（封面左+信息右）3 列会挤到只剩一条缝，降为 1 列全宽
               crossAxisCount: isMobile ? 1 : 3,
@@ -557,27 +564,31 @@ class _DiscoverPageState extends State<DiscoverPage>
               crossAxisSpacing: 14,
               mainAxisSpacing: 14,
             ),
-            itemCount: _books.length,
-            itemBuilder: (context, i) => _DiscoverCard(book: _books[i]),
+            delegate: SliverChildBuilderDelegate(
+              (context, i) => _DiscoverCard(book: _books[i]),
+              childCount: _books.length,
+            ),
           ),
         ),
         if (_more)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _loading
-                ? const SizedBox(
-                    width: 22, height: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : GestureDetector(
-                    onTap: () {
-                      _page++;
-                      _load();
-                    },
-                    child: Text(
-                      '上拉或点击加载更多（$_page/$_pages 页）',
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _loading
+                  ? const SizedBox(
+                      width: 22, height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : GestureDetector(
+                      onTap: () {
+                        _page++;
+                        _load();
+                      },
+                      child: Text(
+                        '上拉或点击加载更多（$_page/$_pages 页）',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
                     ),
-                  ),
+            ),
           ),
       ],
     );

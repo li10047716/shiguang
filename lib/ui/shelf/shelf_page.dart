@@ -699,7 +699,15 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
         const Text('书架',
             style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700)),
         const Spacer(),
-        // 全部▾ 筛选（无底框小字：类型 + 分组，样式同发现页书源选择）
+        // 液态玻璃椭圆胶囊：包住右上角 4 个按钮
+        Glass(
+          radius: 22,
+          blur: 18,
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+        // 全部▾ 筛选（类型 + 分组，样式同发现页书源选择）
         _chip(
           bordered: false,
           child: GlassMenu(
@@ -826,6 +834,9 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
               child: Icon(Icons.more_vert,
                   size: 22, color: Colors.grey.shade800),
             ),
+          ),
+        ),
+            ],
           ),
         ),
       ],
