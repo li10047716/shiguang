@@ -258,33 +258,29 @@ class _DiscoverPageState extends State<DiscoverPage>
   Widget _toolbar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-      child: Glass(
-        radius: 18,
-        blur: 18,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        child: Row(
-          children: [
-            // 搜索
-            IconButton(
-              tooltip: '搜索',
-              icon: const Icon(Icons.search, size: 20),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const SearchPage()),
-              ),
+      // 三个按钮独立无底框（不再共用一个玻璃底框）
+      child: Row(
+        children: [
+          // 搜索
+          IconButton(
+            tooltip: '搜索',
+            icon: Icon(Icons.search, size: 22, color: Colors.grey.shade800),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SearchPage()),
             ),
-            Expanded(
-              child: Center(
-                child: _sourceSelector(),
-              ),
+          ),
+          Expanded(
+            child: Center(
+              child: _sourceSelector(),
             ),
-            // 刷新
-            IconButton(
-              tooltip: '刷新',
-              icon: const Icon(Icons.refresh),
-              onPressed: _refresh,
-            ),
-          ],
-        ),
+          ),
+          // 刷新
+          IconButton(
+            tooltip: '刷新',
+            icon: Icon(Icons.refresh, size: 22, color: Colors.grey.shade800),
+            onPressed: _refresh,
+          ),
+        ],
       ),
     );
   }
@@ -294,20 +290,19 @@ class _DiscoverPageState extends State<DiscoverPage>
     return GestureDetector(
       key: _sourceKey,
       onTap: _toggleSourceMenu,
-      child: Glass(
-        radius: 20,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.menu_book, size: 16, color: Color(0xFFE5A13A)),
-            const SizedBox(width: 6),
-            Text(s.sourceName,
-                style: const TextStyle(
-                    fontSize: 14, fontWeight: FontWeight.w600)),
-            const Icon(Icons.arrow_drop_down, size: 20),
-          ],
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.menu_book, size: 16, color: Color(0xFFE5A13A)),
+          const SizedBox(width: 6),
+          Text(s.sourceName,
+              style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade800)),
+          Icon(Icons.arrow_drop_down,
+              size: 20, color: Colors.grey.shade800),
+        ],
       ),
     );
   }

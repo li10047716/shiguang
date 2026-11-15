@@ -4,6 +4,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/book.dart';
 import '../sources/source.dart';
@@ -89,9 +90,25 @@ class SearchAggregator extends StateNotifier<AggregateSearchState> {
 
   SearchAggregator() : super(const AggregateSearchState());
 
-  /// 启动一次聚合搜索（全部启用书源，小说 + 漫画）
+  /// 启动一次聚合搜索（默认全部启用书源，若在搜索页选了部分书源则只搜那些）
   void search(String keyword) {
-    final sources = SourceRegistry().enabled;
+    final all = SourceRegistry().enabled;
+    SharedPreferences.getInstance().then((sp) {
+      final ids = sp.getStringList(_selectedSourcesKey);
+      var sources = all;
+      if (ids != null && ids.isNotEmpty) {
+        final filtered =
+            all.where((s) => ids.contains(s.sourceId)).toList();
+        if (filtered.isNotEmpty) sources = filtered;
+      }
+      _startSearch(keyword, sources);
+    });
+  }
+
+  /// 选中参与搜索的书源 id（搜索页三点菜单设置，存本地）
+  static const _selectedSourcesKey = 'search_source_ids';
+
+  void _startSearch(String keyword, List<NovelSource> sources) {
     state = AggregateSearchState(
       keyword: keyword,
       running: true,

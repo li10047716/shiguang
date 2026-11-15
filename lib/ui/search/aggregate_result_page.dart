@@ -216,12 +216,20 @@ class _AggregatedTileState extends State<_AggregatedTile> {
                   dense: true,
                   leading: const Icon(Icons.source_outlined, size: 18),
                   title: Text(b.sourceName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 13)),
+                  // 限宽+省略号，避免长“更新”文本把书源名挤成竖排
                   trailing: b.lastChapter == null
                       ? null
-                      : Text('更新: ${b.lastChapter}',
-                          style: TextStyle(
-                              fontSize: 11, color: Colors.grey.shade500)),
+                      : ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 150),
+                          child: Text('更新: ${b.lastChapter}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 11, color: Colors.grey.shade500)),
+                        ),
                   onTap: () => Navigator.of(context).push(MaterialPageRoute(
                     builder: (_) => BookDetailPage(book: b),
                   )),

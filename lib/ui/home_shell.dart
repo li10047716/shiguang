@@ -4,8 +4,6 @@
 /// 内容页用透明 Scaffold 透出背景。用 [IndexedStack] 保留各页状态。
 library;
 
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
 import 'discover/discover_page.dart';
@@ -66,70 +64,47 @@ class _HomeShellState extends State<HomeShell> {
 
   Widget _bottomNav() {
     final inactiveColor = Colors.grey.shade600;
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-          child: Container(
-            color: Colors.white.withValues(alpha: 0.55),
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-            child: Row(
-              mainAxisSize: MainAxisSize.min, // 只包裹三个按钮
-              children: [
-                for (var i = 0; i < _items.length; i++)
-                  InkWell(
-                    borderRadius: BorderRadius.circular(16),
-                    onTap: () => setState(() => _index = i),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 5, horizontal: 16),
-                      decoration: BoxDecoration(
-                        color: i == _index
-                            ? _activeColor.withValues(alpha: 0.14)
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            i == _index ? _items[i].$2 : _items[i].$1,
-                            color: i == _index ? _activeColor : inactiveColor,
-                            size: 22,
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            _items[i].$3,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: i == _index
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
-                              color:
-                                  i == _index ? _activeColor : inactiveColor,
-                            ),
-                          ),
-                        ],
-                      ),
+    // 无底框：图标+文字直接悬浮（不遮内容）
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < _items.length; i++)
+          InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: () => setState(() => _index = i),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 16),
+              decoration: BoxDecoration(
+                color: i == _index
+                    ? _activeColor.withValues(alpha: 0.14)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    i == _index ? _items[i].$2 : _items[i].$1,
+                    color: i == _index ? _activeColor : inactiveColor,
+                    size: 22,
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    _items[i].$3,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: i == _index
+                          ? FontWeight.w600
+                          : FontWeight.w400,
+                      color: i == _index ? _activeColor : inactiveColor,
                     ),
                   ),
-              ],
+                ],
+              ),
             ),
           ),
-        ),
-      ),
+      ],
     );
   }
 }

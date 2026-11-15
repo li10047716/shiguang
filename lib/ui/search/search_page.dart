@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../glass.dart';
+import '../../sources/source_registry.dart';
 import 'aggregate_result_page.dart';
 
 class SearchPage extends StatefulWidget {
@@ -63,6 +64,120 @@ class _SearchPageState extends State<SearchPage> {
     if (mounted) setState(() => _history = []);
   }
 
+  Future<void> _removeHistory(String kw) async {
+    final sp = await SharedPreferences.getInstance();
+    final list = (sp.getStringList(_historyKey) ?? const []).toList()
+      ..remove(kw);
+    await sp.setStringList(_historyKey, list);
+    if (mounted) setState(() => _history = list);
+  }
+
+  /// 白色圆形按钮（返回 / 三点）
+  Widget _roundBtn(IconData icon, String tip, VoidCallback onTap) {
+    return Material(
+      color: Colors.white.withValues(alpha: 0.9),
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Icon(icon, size: 20, color: Colors.grey.shade800),
+        ),
+      ),
+    );
+  }
+
+  /// 三点菜单：选择参与聚合搜索的书源（存本地，聚合器只搜选中的）
+  Future<void> _showSourcePicker() async {
+    final sources = SourceRegistry().enabled;
+    final sp = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    var selected =
+        (sp.getStringList('search_source_ids') ?? const []).toList();
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheet) => ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.78,
+          ),
+          child: Glass(
+            radius: 24,
+            blur: 8,
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text('选择搜索书源',
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w700)),
+                    ),
+                    TextButton(
+                      onPressed: () => setSheet(() =>
+                          selected =
+                              sources.map((s) => s.sourceId).toList()),
+                      child:
+                          const Text('全选', style: TextStyle(fontSize: 12)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      tooltip: '关闭',
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      for (final s in sources)
+                        CheckboxListTile(
+                          dense: true,
+                          title: Text(s.sourceName,
+                              style: const TextStyle(fontSize: 13)),
+                          value: selected.contains(s.sourceId),
+                          onChanged: (v) => setSheet(() {
+                            if (v == true) {
+                              if (!selected.contains(s.sourceId)) {
+                                selected.add(s.sourceId);
+                              }
+                            } else {
+                              selected.remove(s.sourceId);
+                            }
+                          }),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () async {
+                      await sp.setStringList('search_source_ids', selected);
+                      if (mounted) setState(() {});
+                      if (context.mounted) Navigator.pop(context);
+                    },
+                    child: const Text('保存'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _go() {
     final kw = _controller.text.trim();
     if (kw.isEmpty) return;
@@ -84,23 +199,31 @@ class _SearchPageState extends State<SearchPage> {
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
               child: Column(
                 children: [
-                  // 返回 + 搜索框 + 搜索按钮
+                  // 返回 + 搜索框 + 三点(书源选择)
                   Row(
                     children: [
-                      IconButton(
-                        tooltip: '返回',
-                        icon: const Icon(Icons.arrow_back),
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                      const SizedBox(width: 4),
+                      _roundBtn(
+                          Icons.arrow_back, '返回',
+                          () => Navigator.of(context).pop()),
+                      const SizedBox(width: 8),
                       Expanded(
-                        child: Glass(
-                          radius: 22,
-                          blur: 18,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 2),
+                        child: Container(
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.9),
+                            borderRadius: BorderRadius.circular(22),
+                            boxShadow: [
+                              BoxShadow(
+                                color:
+                                    Colors.black.withValues(alpha: 0.06),
+                                blurRadius: 10,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
+                          ),
                           child: Row(
                             children: [
+                              const SizedBox(width: 14),
                               const Icon(Icons.search,
                                   size: 20, color: Colors.grey),
                               const SizedBox(width: 8),
@@ -111,7 +234,9 @@ class _SearchPageState extends State<SearchPage> {
                                   textInputAction: TextInputAction.search,
                                   onSubmitted: (_) => _go(),
                                   decoration: const InputDecoration(
-                                    hintText: '搜索书名 / 作者（聚合搜索全部书源）',
+                                    hintText: '搜索书名、作者',
+                                    hintStyle:
+                                        TextStyle(color: Colors.grey),
                                     border: InputBorder.none,
                                     isDense: true,
                                   ),
@@ -127,69 +252,58 @@ class _SearchPageState extends State<SearchPage> {
                                     setState(() {});
                                   },
                                 ),
+                              const SizedBox(width: 6),
                             ],
                           ),
                         ),
                       ),
                       const SizedBox(width: 8),
-                      // 搜索按钮
-                      Glass(
-                        radius: 22,
-                        blur: 18,
-                        child: IconButton(
-                          tooltip: '搜索',
-                          icon: const Icon(Icons.arrow_forward,
-                              color: Color(0xFF3E8EF7)),
-                          onPressed: _go,
-                        ),
-                      ),
+                      _roundBtn(Icons.more_vert, '选择搜索书源',
+                          _showSourcePicker),
                     ],
                   ),
                   const SizedBox(height: 24),
                   // 有历史：显示搜索历史；无历史：显示提示
-                  if (_history.isNotEmpty)
-                    Glass(
-                      radius: 14,
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Text('搜索历史',
-                                  style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600)),
-                              const Spacer(),
-                              IconButton(
-                                tooltip: '清空历史',
-                                icon: const Icon(Icons.delete_outline,
-                                    size: 18, color: Colors.grey),
-                                onPressed: _clearHistory,
-                              ),
-                            ],
+                  if (_history.isNotEmpty) ...[
+                    Row(
+                      children: [
+                        const Text('搜索历史',
+                            style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600)),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: _clearHistory,
+                          child: const Text('清除',
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.redAccent)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final kw in _history)
+                          InputChip(
+                            label: Text(kw,
+                                style: const TextStyle(fontSize: 12)),
+                            onPressed: () {
+                              _controller.text = kw;
+                              _go();
+                            },
+                            onDeleted: () => _removeHistory(kw),
+                            deleteIcon:
+                                const Icon(Icons.close, size: 14),
+                            backgroundColor:
+                                Colors.white.withValues(alpha: 0.9),
+                            side: BorderSide.none,
                           ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              for (final kw in _history)
-                                ActionChip(
-                                  label: Text(kw,
-                                      style:
-                                          const TextStyle(fontSize: 12)),
-                                  onPressed: () {
-                                    _controller.text = kw;
-                                    _go();
-                                  },
-                                ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    )
-                  else
+                      ],
+                    ),
+                  ] else
                     Glass(
                       radius: 14,
                       blur: 0,
@@ -205,7 +319,7 @@ class _SearchPageState extends State<SearchPage> {
                               style: TextStyle(color: Colors.grey)),
                           const SizedBox(height: 6),
                           Text(
-                            '会同时搜索所有已启用的书源，\n再按「书名 + 作者」聚合结果',
+                            '会同时搜索所选书源，\n再按「书名 + 作者」聚合结果',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                                 color: Colors.grey.shade500, fontSize: 12),

@@ -307,19 +307,40 @@ class _ReaderPageState extends State<ReaderPage>
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      showDragHandle: true, // 顶部下拉手柄，明确可关闭
       backgroundColor: Colors.transparent,
       barrierColor: Colors.transparent, // 背景不变暗
       builder: (context) => StatefulBuilder(
-        builder: (context, setSheet) => SingleChildScrollView(
-          child: Glass(
-            radius: 24,
-            blur: 8,
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 书签当前章
+        builder: (context, setSheet) => ConstrainedBox(
+          // 限制高度，避免内容过高时覆盖全屏
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.78,
+          ),
+          child: SingleChildScrollView(
+            child: Glass(
+              radius: 24,
+              blur: 8,
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 标题栏：设置 + 关闭按钮（避免全屏后无法返回）
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text('阅读设置',
+                            style: TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.w700)),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        tooltip: '关闭',
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                  // 书签当前章
                 ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
@@ -333,60 +354,18 @@ class _ReaderPageState extends State<ReaderPage>
                     _toggleBookmark();
                   },
                 ),
-                _sheetSlider('字号', _fontSize, 14, 28,
-                    label: _fontSize.toStringAsFixed(0), onChanged: (v) async {
-                  setState(() => _fontSize = v);
-                  setSheet(() => _fontSize = v);
-                  final sp = await SharedPreferences.getInstance();
-                  await sp.setDouble('reader_font_size', v);
-                }),
-                _sheetSlider('行距', _lineHeight, 1.4, 2.4,
-                    label: _lineHeight.toStringAsFixed(2),
-                    onChanged: (v) async {
-                  setState(() => _lineHeight = v);
-                  setSheet(() => _lineHeight = v);
-                  final sp = await SharedPreferences.getInstance();
-                  await sp.setDouble('reader_line_height', v);
-                }),
-                _sheetSlider('段距', _paraGap.toDouble(), 0, 3,
-                    label: _paraGap.toString(), onChanged: (v) async {
-                  setState(() => _paraGap = v.round());
-                  setSheet(() => _paraGap = v.round());
-                  final sp = await SharedPreferences.getInstance();
-                  await sp.setInt('reader_para_gap', v.round());
-                }),
-                // 字体
-                Row(
-                  children: [
-                    const Text('字体'),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Wrap(
-                        spacing: 6,
-                        children: [
-                          for (var i = 0;
-                              i < ReaderPrefs.fontNames.length;
-                              i++)
-                            ChoiceChip(
-                              label: Text(ReaderPrefs.fontNames[i]),
-                              labelStyle: const TextStyle(fontSize: 12),
-                              visualDensity: VisualDensity.compact,
-                              selected: ReaderPrefs.fontFamilies[i] ==
-                                  _fontFamily,
-                              onSelected: (_) async {
-                                setState(() =>
-                                    _fontFamily = ReaderPrefs.fontFamilies[i]);
-                                setSheet(() =>
-                                    _fontFamily = ReaderPrefs.fontFamilies[i]);
-                                final sp =
-                                    await SharedPreferences.getInstance();
-                                await sp.setInt('reader_font_index', i);
-                              },
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
+                // 字体设置入口（字号/行距/段距/字体移入子面板）
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading:
+                      const Icon(Icons.text_fields, color: Color(0xFF3E8EF7)),
+                  title: const Text('字体设置'),
+                  trailing: const Icon(Icons.chevron_right, size: 20),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showFontSettings();
+                  },
                 ),
                 const SizedBox(height: 12),
                 // 背景（8 主题）
@@ -673,6 +652,108 @@ class _ReaderPageState extends State<ReaderPage>
             ),
           ),
         ),
+        ),
+      ),
+    );
+  }
+
+  /// 字体设置子面板：字号 / 行距 / 段距 / 字体族（从设置弹窗移出）
+  Future<void> _showFontSettings() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheet) => ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.78,
+          ),
+          child: SingleChildScrollView(
+            child: Glass(
+              radius: 24,
+              blur: 8,
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text('字体设置',
+                            style: TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.w700)),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        tooltip: '关闭',
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                  _sheetSlider('字号', _fontSize, 14, 28,
+                      label: _fontSize.toStringAsFixed(0),
+                      onChanged: (v) async {
+                    setState(() => _fontSize = v);
+                    setSheet(() => _fontSize = v);
+                    final sp = await SharedPreferences.getInstance();
+                    await sp.setDouble('reader_font_size', v);
+                  }),
+                  _sheetSlider('行距', _lineHeight, 1.4, 2.4,
+                      label: _lineHeight.toStringAsFixed(2),
+                      onChanged: (v) async {
+                    setState(() => _lineHeight = v);
+                    setSheet(() => _lineHeight = v);
+                    final sp = await SharedPreferences.getInstance();
+                    await sp.setDouble('reader_line_height', v);
+                  }),
+                  _sheetSlider('段距', _paraGap.toDouble(), 0, 3,
+                      label: _paraGap.toString(), onChanged: (v) async {
+                    setState(() => _paraGap = v.round());
+                    setSheet(() => _paraGap = v.round());
+                    final sp = await SharedPreferences.getInstance();
+                    await sp.setInt('reader_para_gap', v.round());
+                  }),
+                  // 字体族
+                  Row(
+                    children: [
+                      const Text('字体'),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Wrap(
+                          spacing: 6,
+                          children: [
+                            for (var i = 0;
+                                i < ReaderPrefs.fontNames.length;
+                                i++)
+                              ChoiceChip(
+                                label: Text(ReaderPrefs.fontNames[i]),
+                                labelStyle: const TextStyle(fontSize: 12),
+                                visualDensity: VisualDensity.compact,
+                                selected: ReaderPrefs.fontFamilies[i] ==
+                                    _fontFamily,
+                                onSelected: (_) async {
+                                  setState(() => _fontFamily =
+                                      ReaderPrefs.fontFamilies[i]);
+                                  setSheet(() => _fontFamily =
+                                      ReaderPrefs.fontFamilies[i]);
+                                  final sp =
+                                      await SharedPreferences.getInstance();
+                                  await sp.setInt('reader_font_index', i);
+                                },
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -893,7 +974,7 @@ class _ReaderPageState extends State<ReaderPage>
                 ),
               ),
             ),
-          // 顶部：章节名常显居中（阅读界面内，透明）+ 返回按钮随控制栏呼出
+          // 顶部：返回按钮随控制栏呼出（章节名不再常显，正文从顶部开始）
           Positioned(
             top: 0,
             left: 0,
@@ -902,18 +983,6 @@ class _ReaderPageState extends State<ReaderPage>
               bottom: false,
               child: Stack(
                 children: [
-                  // 常显章节名（居中）
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Center(
-                      child: Text(
-                        _list.isEmpty ? '' : _list[_index].title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 14, color: fg),
-                      ),
-                    ),
-                  ),
                   // 呼出时：返回按钮（独立玻璃圆钮，不再整条毛玻璃）
                   _fadeBar(
                     child: Align(
@@ -950,29 +1019,6 @@ class _ReaderPageState extends State<ReaderPage>
             right: 16,
             child: _fadeBar(
               child: SafeArea(top: false, child: _bottomBar(fg)),
-            ),
-          ),
-          // 角落进度（常显，悬浮面板之上）：左下整本百分比 / 右下本章分页进度
-          Positioned(
-            left: 20,
-            bottom: 8,
-            child: IgnorePointer(
-              child: Text(
-                _chapterPercentText(),
-                style: TextStyle(
-                    fontSize: 12, color: fg.withValues(alpha: 0.5)),
-              ),
-            ),
-          ),
-          Positioned(
-            right: 20,
-            bottom: 8,
-            child: IgnorePointer(
-              child: Text(
-                _pageProgressText(),
-                style: TextStyle(
-                    fontSize: 12, color: fg.withValues(alpha: 0.5)),
-              ),
             ),
           ),
           // 目录面板：常驻缓存（打开只滑入，不重建列表 → 秒开）
@@ -1036,13 +1082,6 @@ class _ReaderPageState extends State<ReaderPage>
     final list = _list;
     if (list.isEmpty) return '';
     return '${((_index + 1) / list.length * 100).round()}%';
-  }
-
-  /// 右下角：本章分页进度（当前屏/总屏）
-  String _pageProgressText() {
-    if (_content?.isComic == true) return '';
-    if (_pages.isEmpty) return '';
-    return '${_pageIndex + 1}/${_pages.length}';
   }
 
   /// 控制栏显隐包装（淡入淡出 + 隐藏时不拦截点击）
@@ -1148,11 +1187,11 @@ class _ReaderPageState extends State<ReaderPage>
                 child: Text('上一章', style: TextStyle(color: fg)),
               ),
             ),
-            const SizedBox(width: 10),
-            _glassChip(
-              alpha: alpha,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
+            const SizedBox(width: 8),
+            // 进度条占剩余宽度自适应，避免窄屏 Row 溢出截断
+            Expanded(
+              child: _glassChip(
+                alpha: alpha,
                 child: Slider(
                   value: _sliderDrag ?? _index.toDouble(),
                   min: 0,
@@ -1167,7 +1206,7 @@ class _ReaderPageState extends State<ReaderPage>
                 ),
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             _glassChip(
               alpha: alpha,
               child: TextButton(
@@ -1343,9 +1382,10 @@ class _ReaderPageState extends State<ReaderPage>
 
   static const double _pagePadH = 20;
   static const double _pagePadV = 24;
-
-  /// 常显顶栏（返回+章节名）占用的顶部高度，正文要避开
-  static const double _topBarH = 52;
+  /// 页眉章节名 + 间距 占用的高度（正文从其下方开始）
+  static const double _headerH = 24;
+  /// 页脚分页进度 + 间距 占用的高度
+  static const double _footerH = 22;
 
   TextStyle _novelStyle(Color fg) => TextStyle(
         fontSize: _fontSize,
@@ -1358,9 +1398,10 @@ class _ReaderPageState extends State<ReaderPage>
   Widget _novelPaged(Color fg) {
     return LayoutBuilder(
       builder: (context, constraints) {
+        final safeTop = MediaQuery.of(context).padding.top;
         final size = Size(
           constraints.maxWidth - _pagePadH * 2,
-          constraints.maxHeight - _topBarH - _pagePadV,
+          constraints.maxHeight - safeTop - _headerH - _footerH - _pagePadV,
         );
         _reflow(fg, size);
         if (_pages.isEmpty) {
@@ -1410,32 +1451,66 @@ class _ReaderPageState extends State<ReaderPage>
     final text = Text(_pages[i],
         style: _novelStyle(fg),
         textAlign: _justify ? TextAlign.justify : TextAlign.start);
+    final safeTop = MediaQuery.of(context).padding.top;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
-          _pagePadH, _topBarH, _pagePadH, _pagePadV),
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: _noteMode
-            ? SelectionArea(
-                onSelectionChanged: (sel) {
-                  if (sel != null) _selectedText = sel.plainText;
-                },
-                contextMenuBuilder: (context, state) =>
-                    AdaptiveTextSelectionToolbar.buttonItems(
-                  anchors: state.contextMenuAnchors,
-                  buttonItems: [
-                    ContextMenuButtonItem(
-                      label: '记笔记',
-                      onPressed: _selectedText.trim().isEmpty
-                          ? null
-                          : () => _addNoteFromSelection(_selectedText),
-                    ),
-                    ...state.contextMenuButtonItems,
-                  ],
-                ),
-                child: text,
-              )
-            : text,
+      padding: EdgeInsets.fromLTRB(
+          _pagePadH, safeTop, _pagePadH, _pagePadV),
+      // 整页一体：页眉章节名 + 正文 + 页脚分页进度，随翻页一起动
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _list.isEmpty ? '' : _list[_index].title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+                fontSize: 12, color: fg.withValues(alpha: 0.55)),
+          ),
+          const SizedBox(height: 6),
+          Expanded(
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: _noteMode
+                  ? SelectionArea(
+                      onSelectionChanged: (sel) {
+                        if (sel != null) _selectedText = sel.plainText;
+                      },
+                      contextMenuBuilder: (context, state) =>
+                          AdaptiveTextSelectionToolbar.buttonItems(
+                        anchors: state.contextMenuAnchors,
+                        buttonItems: [
+                          ContextMenuButtonItem(
+                            label: '记笔记',
+                            onPressed: _selectedText.trim().isEmpty
+                                ? null
+                                : () => _addNoteFromSelection(_selectedText),
+                          ),
+                          ...state.contextMenuButtonItems,
+                        ],
+                      ),
+                      child: text,
+                    )
+                  : text,
+            ),
+          ),
+          const SizedBox(height: 4),
+          // 页脚：左整本进度，右本章分页进度（随页一体）
+          Row(
+            children: [
+              Text(
+                _chapterPercentText(),
+                style: TextStyle(
+                    fontSize: 12, color: fg.withValues(alpha: 0.5)),
+              ),
+              const Spacer(),
+              Text(
+                '${i + 1}/${_pages.length}',
+                style: TextStyle(
+                    fontSize: 12, color: fg.withValues(alpha: 0.5)),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -1560,7 +1635,7 @@ class _ComicView extends StatelessWidget {
         reverse: reverse,
         itemCount: content.pages.length,
         itemBuilder: (context, i) => Padding(
-          padding: const EdgeInsets.only(top: _ReaderPageState._topBarH),
+          padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top + 8),
           child: Center(child: img(i)),
         ),
       );

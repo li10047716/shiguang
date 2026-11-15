@@ -677,15 +677,17 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   }
 
   /// 独立玻璃胶囊/圆钮：悬浮半透明白 + 高光描边（不再用整条玻璃容器）。
-  Widget _chip({required Widget child, double alpha = 0.35}) {
+  Widget _chip({required Widget child, double alpha = 0.35, bool bordered = true}) {
     return Container(
       margin: const EdgeInsets.only(left: 8),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: alpha),
-        borderRadius: BorderRadius.circular(22),
-        border:
-            Border.all(color: Colors.white.withValues(alpha: 0.55), width: 1),
-      ),
+      decoration: bordered
+          ? BoxDecoration(
+              color: Colors.white.withValues(alpha: alpha),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.55), width: 1),
+            )
+          : null,
       child: child,
     );
   }
@@ -697,8 +699,9 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
         const Text('书架',
             style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700)),
         const Spacer(),
-        // 全部▾ 筛选（玻璃下拉：类型 + 分组，样式同发现页书源选择）
+        // 全部▾ 筛选（无底框小字：类型 + 分组，样式同发现页书源选择）
         _chip(
+          bordered: false,
           child: GlassMenu(
             width: 200,
             items: [
@@ -767,34 +770,39 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
                                 : _filter == ContentType.comic
                                     ? '漫画'
                                     : '视频')),
-                    style: const TextStyle(fontSize: 14),
+                    style: TextStyle(fontSize: 13, color: Colors.grey.shade800),
                   ),
-                  const Icon(Icons.arrow_drop_down, size: 18),
+                  Icon(Icons.arrow_drop_down,
+                      size: 16, color: Colors.grey.shade800),
                 ],
               ),
             ),
           ),
         ),
-        // 视图切换（玻璃圆钮）
+        // 视图切换（无底框小图标）
         _chip(
+          bordered: false,
           child: IconButton(
             tooltip: _listView ? '网格视图' : '列表视图',
-            icon: Icon(_listView ? Icons.grid_view : Icons.view_list),
+            icon: Icon(_listView ? Icons.grid_view : Icons.view_list,
+                size: 22, color: Colors.grey.shade800),
             onPressed: () => setState(() => _listView = !_listView),
           ),
         ),
-        // 搜索（玻璃圆钮）
+        // 搜索（无底框小图标）
         _chip(
+          bordered: false,
           child: IconButton(
             tooltip: '搜索',
-            icon: const Icon(Icons.search),
+            icon: Icon(Icons.search, size: 22, color: Colors.grey.shade800),
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const SearchPage()),
             ),
           ),
         ),
-        // 更多（玻璃下拉，样式同发现页书源选择）
+        // 更多（无底框小图标下拉，样式同发现页书源选择）
         _chip(
+          bordered: false,
           child: GlassMenu(
             items: [
               GlassMenuItem(
@@ -815,7 +823,8 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
             ],
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              child: const Icon(Icons.more_vert),
+              child: Icon(Icons.more_vert,
+                  size: 22, color: Colors.grey.shade800),
             ),
           ),
         ),
