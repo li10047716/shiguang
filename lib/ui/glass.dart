@@ -65,6 +65,63 @@ class GlassDialog extends StatelessWidget {
   }
 }
 
+/// 玻璃圆钮：白 0.42 填充 + 毛玻璃 blur 8 + 描边 + 投影。
+/// 与阅读器控制栏圆钮同款，供各页顶部图标按钮统一使用。
+class GlassRoundButton extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onTap;
+  final Color? color;
+  final double iconSize;
+
+  const GlassRoundButton({
+    super.key,
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.color,
+    this.iconSize = 20,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+                color: Colors.white.withValues(alpha: 0.55), width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: ClipOval(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+              child: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.42),
+                ),
+                child: Icon(icon,
+                    size: iconSize, color: color ?? Colors.grey.shade800),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// 液态玻璃容器。
 class Glass extends StatelessWidget {
   final Widget child;

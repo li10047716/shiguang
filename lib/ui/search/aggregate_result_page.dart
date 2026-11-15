@@ -49,10 +49,10 @@ class _AggregateResultPageState extends ConsumerState<AggregateResultPage> {
                   padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
                   child: Row(
                     children: [
-                      IconButton(
+                      GlassRoundButton(
                         tooltip: '返回',
-                        icon: const Icon(Icons.arrow_back),
-                        onPressed: () => Navigator.of(context).pop(),
+                        icon: Icons.arrow_back,
+                        onTap: () => Navigator.of(context).pop(),
                       ),
                       const SizedBox(width: 4),
                       Expanded(
@@ -64,10 +64,10 @@ class _AggregateResultPageState extends ConsumerState<AggregateResultPage> {
                               fontSize: 17, fontWeight: FontWeight.w700),
                         ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.edit),
+                      GlassRoundButton(
+                        icon: Icons.edit,
                         tooltip: '重新搜索',
-                        onPressed: () => Navigator.of(context).pushReplacement(
+                        onTap: () => Navigator.of(context).pushReplacement(
                           MaterialPageRoute(builder: (_) => const SearchPage()),
                         ),
                       ),

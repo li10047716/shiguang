@@ -9,7 +9,6 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../models/book.dart';
@@ -812,8 +811,6 @@ class _MinePageState extends ConsumerState<MinePage> {
             _showDarkSheet),
         _settingTile(Icons.palette_outlined, '主题色', '应用强调色',
             _showAccentSheet),
-        _settingTile(Icons.wallpaper_outlined, '阅读壁纸',
-            '阅读背景 · 内置渐变 / 本地图片', _showWallpaperSheet),
         const SizedBox(height: 20),
         Text('通用',
             style: TextStyle(
@@ -831,177 +828,6 @@ class _MinePageState extends ConsumerState<MinePage> {
     );
   }
 
-  // ---------- 阅读壁纸 ----------
-
-  /// 选择阅读壁纸：内置渐变 / 本地导入图片 / 删除。存 SharedPreferences 供阅读器使用。
-  Future<void> _showWallpaperSheet() async {
-    final sp = await SharedPreferences.getInstance();
-    if (!mounted) return;
-    var cur = sp.getInt('reader_wallpaper') ?? 0;
-    var curImg = sp.getString('reader_wallpaper_img') ?? '';
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.transparent,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheet) => ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.78,
-          ),
-          child: SingleChildScrollView(
-            child: Glass(
-              radius: 24,
-              blur: 8,
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Expanded(
-                        child: Text('阅读壁纸',
-                            style: TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.w700)),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        tooltip: '关闭',
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
-                  ),
-                  // 内置渐变
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Padding(
-                          padding: EdgeInsets.only(top: 8), child: Text('内置')),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (var i = 0;
-                                i < ReaderPrefs.wallpapers.length;
-                                i++)
-                              GestureDetector(
-                                onTap: () async {
-                                  final p =
-                                      await SharedPreferences.getInstance();
-                                  await p.setInt('reader_wallpaper', i);
-                                  await p.setString(
-                                      'reader_wallpaper_img', '');
-                                  setSheet(() {
-                                    cur = i;
-                                    curImg = '';
-                                  });
-                                },
-                                child: Container(
-                                  width: 40,
-                                  height: 28,
-                                  decoration: BoxDecoration(
-                                    gradient: i == 0
-                                        ? null
-                                        : LinearGradient(
-                                            colors: ReaderPrefs.wallpapers[i],
-                                            begin: Alignment.topLeft,
-                                            end: Alignment.bottomRight),
-                                    color: i == 0 ? Colors.white : null,
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(
-                                      color: curImg.isEmpty && cur == i
-                                          ? Colors.blue
-                                          : Colors.grey,
-                                      width:
-                                          curImg.isEmpty && cur == i ? 2 : 1,
-                                    ),
-                                  ),
-                                  child: i == 0
-                                      ? const Icon(Icons.block,
-                                          size: 12, color: Colors.grey)
-                                      : null,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  // 本地图片
-                  Row(
-                    children: [
-                      const Text('本地图片'),
-                      const Spacer(),
-                      if (curImg.isNotEmpty)
-                        IconButton(
-                          tooltip: '删除本地壁纸',
-                          icon: const Icon(Icons.delete_outline,
-                              size: 20, color: Color(0xFFE5484D)),
-                          onPressed: () async {
-                            final p = await SharedPreferences.getInstance();
-                            await p.setString('reader_wallpaper_img', '');
-                            await p.setInt('reader_wallpaper', 0);
-                            setSheet(() {
-                              cur = 0;
-                              curImg = '';
-                            });
-                          },
-                        ),
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          final path = await _pickWallpaperImage();
-                          if (path != null) {
-                            setSheet(() {
-                              curImg = path;
-                              cur = 0;
-                            });
-                          }
-                        },
-                        icon: const Icon(Icons.add_photo_alternate_outlined,
-                            size: 18),
-                        label: Text(curImg.isEmpty ? '导入本地图片' : '更换图片'),
-                      ),
-                    ],
-                  ),
-                  if (curImg.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 10),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.file(File(curImg),
-                            height: 120,
-                            width: double.infinity,
-                            fit: BoxFit.cover),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// 选一张本地图片复制到应用文档目录，设为阅读壁纸，返回路径。
-  Future<String?> _pickWallpaperImage() async {
-    final res = await FilePicker.platform.pickFiles(type: FileType.image);
-    if (res == null || res.files.isEmpty) return null;
-    final src = res.files.single;
-    if (src.path == null) return null;
-    final dir = await getApplicationDocumentsDirectory();
-    final dest = File('${dir.path}/reader_wallpaper.png');
-    await File(src.path!).copy(dest.path);
-    final sp = await SharedPreferences.getInstance();
-    await sp.setString('reader_wallpaper_img', dest.path);
-    await sp.setInt('reader_wallpaper', 0);
-    return dest.path;
-  }
 
   // ---------- 外观 ----------
 
@@ -1384,8 +1210,7 @@ class _ReaderSettingsPageState extends State<_ReaderSettingsPage> {
   double _font = 18;
   int _bg = 0;
   double _line = 1.9;
-  int _para = 1;
-  int _fontIdx = 0;
+  double _para = 1.0;
   double _bright = 1.0;
   int _turn = 0;
   bool _autoNight = true;
@@ -1403,8 +1228,8 @@ class _ReaderSettingsPageState extends State<_ReaderSettingsPage> {
     setState(() {
       _font = sp.getDouble('reader_font_size') ?? 18;
       _line = sp.getDouble('reader_line_height') ?? 1.9;
-      _para = sp.getInt('reader_para_gap') ?? 1;
-      _fontIdx = sp.getInt('reader_font_index') ?? 0;
+      final pg = sp.get('reader_para_gap');
+      _para = pg is int ? pg.toDouble() : (pg is double ? pg : 1.0);
       _bright = sp.getDouble('reader_brightness') ?? 1.0;
       _turn = sp.getInt('reader_turn_mode') ?? 0;
       _autoNight = sp.getBool('reader_auto_night') ?? true;
@@ -1433,13 +1258,15 @@ class _ReaderSettingsPageState extends State<_ReaderSettingsPage> {
   }
 
   Widget _sliderCard(String title, double value, double min, double max,
-      String label, ValueChanged<double> onChanged) {
+      String label, ValueChanged<double> onChanged,
+      {int? divisions}) {
     return _card(
         title,
         Slider(
           value: value.clamp(min, max),
           min: min,
           max: max,
+          divisions: divisions,
           label: label,
           onChanged: onChanged,
         ));
@@ -1482,43 +1309,21 @@ class _ReaderSettingsPageState extends State<_ReaderSettingsPage> {
                               setState(() => _font = v);
                               final sp = await SharedPreferences.getInstance();
                               await sp.setDouble('reader_font_size', v);
-                            }),
+                            }, divisions: 14),
                             const SizedBox(height: 12),
                             _sliderCard('行距', _line, 1.4, 2.4,
                                 _line.toStringAsFixed(2), (v) async {
                               setState(() => _line = v);
                               final sp = await SharedPreferences.getInstance();
                               await sp.setDouble('reader_line_height', v);
-                            }),
+                            }, divisions: 10),
                             const SizedBox(height: 12),
-                            _sliderCard('段距', _para.toDouble(), 0, 3,
-                                _para.toString(), (v) async {
-                              setState(() => _para = v.round());
+                            _sliderCard('段距', _para, 0, 3,
+                                _para.toStringAsFixed(1), (v) async {
+                              setState(() => _para = v);
                               final sp = await SharedPreferences.getInstance();
-                              await sp.setInt('reader_para_gap', v.round());
-                            }),
-                            const SizedBox(height: 12),
-                            _card(
-                                '字体',
-                                Wrap(
-                                  spacing: 8,
-                                  children: [
-                                    for (var i = 0;
-                                        i < ReaderPrefs.fontNames.length;
-                                        i++)
-                                      ChoiceChip(
-                                        label: Text(ReaderPrefs.fontNames[i]),
-                                        selected: _fontIdx == i,
-                                        onSelected: (_) async {
-                                          setState(() => _fontIdx = i);
-                                          final sp = await SharedPreferences
-                                              .getInstance();
-                                          await sp.setInt(
-                                              'reader_font_index', i);
-                                        },
-                                      ),
-                                  ],
-                                )),
+                              await sp.setDouble('reader_para_gap', v);
+                            }, divisions: 30),
                             const SizedBox(height: 12),
                             _card(
                                 '阅读背景',

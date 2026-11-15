@@ -5,6 +5,8 @@
 /// （封面在左带「小说/漫画」角标，信息在右：书名/作者/已读/来源/最新章节）。
 library;
 
+import 'dart:ui';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -53,12 +55,29 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   Map<String, int> _times = {};
   static const _sortNames = ['最近阅读', '书名'];
 
+  // 顶部标题栏高度（列表顶部预留，滚动时卡片从标题下经过）
+  static const double _headerH = 76;
+  // 标题栏毛玻璃：列表滚过标题区时淡入，模糊背后卡片
+  final ScrollController _scrollCtrl = ScrollController();
+  bool _showBar = false;
+
   @override
   void initState() {
     super.initState();
     ref.read(libraryProvider.notifier).load();
     _loadProgress();
     _loadGroups();
+    _scrollCtrl.addListener(() {
+      final off = _scrollCtrl.hasClients ? _scrollCtrl.offset : 0.0;
+      final show = off > 8; // 卡片刚进入标题区即显示毛玻璃
+      if (show != _showBar) setState(() => _showBar = show);
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollCtrl.dispose();
+    super.dispose();
   }
 
   @override
@@ -78,11 +97,42 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
       onKeyEvent: _onKey,
       child: Scaffold(
       backgroundColor: Colors.transparent,
-      body: Column(
+      body: Stack(
         children: [
-          _header(),
-          Expanded(
-            child: books.isEmpty ? _empty() : _grid(books),
+          // 列表：顶部预留标题栏高度，滚动时卡片从标题下经过
+          Positioned.fill(
+            child: Padding(
+              padding: const EdgeInsets.only(top: _headerH),
+              child: books.isEmpty ? _empty() : _grid(books),
+            ),
+          ),
+          // 标题栏毛玻璃背景（滚动时淡入，模糊经过的卡片）
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: IgnorePointer(
+              child: AnimatedOpacity(
+                opacity: _showBar ? 1 : 0,
+                duration: const Duration(milliseconds: 180),
+                child: ClipRect(
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                    child: Container(
+                      height: _headerH,
+                      color: Colors.white.withValues(alpha: 0.42),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // 标题栏（文字+胶囊常显，不随毛玻璃淡出）
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: _header(),
           ),
         ],
       ),
@@ -961,6 +1011,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     final display = _manageMode ? _sortedBooks(books) : books;
     if (_listView) {
       return ListView.builder(
+        controller: _scrollCtrl,
         padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
         itemCount: display.length,
         itemBuilder: (context, i) => Padding(
@@ -982,6 +1033,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     }
     final isMobile = MediaQuery.of(context).size.width < 600;
     return GridView.builder(
+      controller: _scrollCtrl,
       padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         // 手机屏窄：横向卡（封面左+信息右）3 列会挤到只剩一条缝，降为 1 列全宽

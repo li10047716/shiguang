@@ -286,10 +286,10 @@ class _DiscoverPageState extends State<DiscoverPage>
       child: Row(
         children: [
           // 搜索
-          IconButton(
+          GlassRoundButton(
+            icon: Icons.search,
             tooltip: '搜索',
-            icon: Icon(Icons.search, size: 22, color: Colors.grey.shade800),
-            onPressed: () => Navigator.of(context).push(
+            onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const SearchPage()),
             ),
           ),
@@ -299,10 +299,10 @@ class _DiscoverPageState extends State<DiscoverPage>
             ),
           ),
           // 刷新
-          IconButton(
+          GlassRoundButton(
+            icon: Icons.refresh,
             tooltip: '刷新',
-            icon: Icon(Icons.refresh, size: 22, color: Colors.grey.shade800),
-            onPressed: _refresh,
+            onTap: _refresh,
           ),
         ],
       ),

@@ -326,10 +326,10 @@ class _BookDetailPageState extends State<BookDetailPage> {
                       padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
                       child: Row(
                         children: [
-                          IconButton(
+                          GlassRoundButton(
+                            icon: Icons.arrow_back,
                             tooltip: '返回',
-                            icon: const Icon(Icons.arrow_back),
-                            onPressed: () => Navigator.of(context).pop(),
+                            onTap: () => Navigator.of(context).pop(),
                           ),
                           const SizedBox(width: 4),
                           Expanded(

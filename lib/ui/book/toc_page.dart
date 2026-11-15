@@ -218,10 +218,10 @@ class _TocPageState extends State<TocPage> {
                   padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
                   child: Row(
                     children: [
-                      IconButton(
+                      GlassRoundButton(
+                        icon: Icons.arrow_back,
                         tooltip: '返回',
-                        icon: const Icon(Icons.arrow_back),
-                        onPressed: () => Navigator.of(context).pop(),
+                        onTap: () => Navigator.of(context).pop(),
                       ),
                       const SizedBox(width: 4),
                       Expanded(
@@ -233,10 +233,10 @@ class _TocPageState extends State<TocPage> {
                               fontSize: 17, fontWeight: FontWeight.w700),
                         ),
                       ),
-                      IconButton(
+                      GlassRoundButton(
+                        icon: Icons.refresh,
                         tooltip: '刷新目录',
-                        icon: const Icon(Icons.refresh),
-                        onPressed: _refreshing ? null : () => _fetch(),
+                        onTap: _refreshing ? null : () => _fetch(),
                       ),
                     ],
                   ),

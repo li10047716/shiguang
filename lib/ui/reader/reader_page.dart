@@ -6,10 +6,13 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../models/book.dart';
@@ -55,23 +58,24 @@ class _ReaderPageState extends State<ReaderPage>
 
   // ---- 阅读体验增强 ----
   double _lineHeight = 1.9; // 行距
-  int _paraGap = 1; // 段距（段落间额外空行数 0-3）
+  double _paraGap = 1.0; // 段距（段落间距，单位 = 行高倍数，0-3 连续）
   String? _fontFamily; // 字体（null = 系统默认）
   double _brightness = 1.0; // 亮度（1 = 无遮罩，越低越暗）
-  int _turnMode = 0; // 翻页效果：0 滑动 / 1 覆盖
+  int _turnMode = 0; // 翻页效果：0 左右平移 / 1 上下平移 / 2 上下滑动 / 3 仿真翻页
   bool _autoNight = true; // 夜间自动切换（21:00-7:00）
-  bool _indent = true; // 段首缩进
-  bool _justify = false; // 两端对齐
+  final bool _indent = true; // 段首缩进（固定开启）
+  final bool _justify = false; // 两端对齐（固定关闭）
   int _wallpaper = 0; // 背景壁纸（0 = 无，>0 = 内置渐变索引）
   String _wallpaperImg = ''; // 本地导入的壁纸图片路径（空 = 无）
-  double _pagePadH = 20; // 正文左右页边距（可调）
-  double _pagePadV = 24; // 正文上下页边距（可调）
+  double _pagePadLeft = 20; // 左边距（可调，独立）
+  double _pagePadRight = 20; // 右边距（可调，独立）
+  double _pagePadTop = 6; // 上页边距：章标题与正文间距（可调）
+  double _pagePadBottom = 8; // 下页边距：正文末行与进度行间距（可调）
   bool _immersive = false; // 沉浸阅读（隐藏状态栏）
 
-  // 覆盖翻页动画
-  late final AnimationController _coverAnim;
-  int _coverTarget = 0;
-  int _coverDir = 1;
+  // 上下滑动（连续滚动）控制器
+  final ScrollController _scrollCtrl = ScrollController();
+  double _scrollPercent = 0; // 上下滑动进度 0-1
 
   // 阅读时长统计：上次结算时刻
   DateTime _lastTick = DateTime.now();
@@ -107,7 +111,7 @@ class _ReaderPageState extends State<ReaderPage>
   // ---------- 小说分页（左右翻页 + 本章进度） ----------
   final PageController _pageController = PageController();
   int _pageIndex = 0;
-  List<String> _pages = const []; // 当前章分页文本
+  List<_NovelPage> _pages = const []; // 当前章分页（每页=段落片段列表，段距像素级）
   String? _reflowKey; // 分页指纹（内容/字号/尺寸变则重排）
   int? _pendingPage; // 跨章进入时定位（prev 进章 → 最后一页）
 
@@ -135,8 +139,7 @@ class _ReaderPageState extends State<ReaderPage>
   void initState() {
     super.initState();
     _index = widget.initialIndex;
-    _coverAnim = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 240));
+    _scrollCtrl.addListener(_onScrollChanged);
     _loadSettings();
     _loadChapter(_index);
   }
@@ -148,7 +151,7 @@ class _ReaderPageState extends State<ReaderPage>
     _pageController.dispose();
     _tocController.dispose();
     _tocSearchCtrl.dispose();
-    _coverAnim.dispose();
+    _scrollCtrl.dispose();
     _tick(); // 结算阅读时长
     // 退出阅读器：恢复系统状态栏显示
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -161,7 +164,9 @@ class _ReaderPageState extends State<ReaderPage>
     setState(() {
       _fontSize = sp.getDouble('reader_font_size') ?? 18;
       _lineHeight = sp.getDouble('reader_line_height') ?? 1.9;
-      _paraGap = sp.getInt('reader_para_gap') ?? 1;
+      // 旧版本存的是 int，getDouble 可能类型不符 → 手动兼容转换
+      final pg = sp.get('reader_para_gap');
+      _paraGap = pg is int ? pg.toDouble() : (pg is double ? pg : 1.0);
       final fi = sp.getInt('reader_font_index') ?? 0;
       _fontFamily =
           ReaderPrefs.fontFamilies[fi.clamp(0, ReaderPrefs.fontFamilies.length - 1)];
@@ -172,7 +177,7 @@ class _ReaderPageState extends State<ReaderPage>
       var bg = ReaderPrefs.bgOptions[bgIndex.clamp(0, ReaderPrefs.bgOptions.length - 1)];
       // 夜间自动：夜间时段且当前非暗色 → 强制夜间
       if (_autoNight && _isNightNow() && bg.computeLuminance() > 0.3) {
-        bg = ReaderPrefs.bgOptions[3];
+        bg = ReaderPrefs.bgOptions[2]; // 夜间
       }
       _bg = bg;
       _comicPage = sp.getBool('comic_page_mode') ?? false;
@@ -180,12 +185,22 @@ class _ReaderPageState extends State<ReaderPage>
       _comicReadDir = sp.getBool('comic_read_dir') ?? false;
       _autoSec = sp.getInt('reader_auto_sec') ?? 10;
       _bgSound = sp.getBool('reader_bg_sound') ?? false;
-      _indent = sp.getBool('reader_indent') ?? true;
-      _justify = sp.getBool('reader_justify') ?? false;
+      // 段首缩进固定开启（默认 true），两端对齐固定关闭（默认 false）
       _wallpaper = sp.getInt('reader_wallpaper') ?? 0;
       _wallpaperImg = sp.getString('reader_wallpaper_img') ?? '';
-      _pagePadH = sp.getDouble('reader_page_pad') ?? 20;
-      _pagePadV = sp.getDouble('reader_page_pad_v') ?? 24;
+      // 左右边距：新键独立；旧合并键 reader_page_pad 迁移为左右相等
+      final pl = sp.getDouble('reader_page_pad_left');
+      final pr = sp.getDouble('reader_page_pad_right');
+      if (pl != null || pr != null) {
+        _pagePadLeft = pl ?? 20;
+        _pagePadRight = pr ?? 20;
+      } else {
+        final old = sp.getDouble('reader_page_pad') ?? 20;
+        _pagePadLeft = old;
+        _pagePadRight = old;
+      }
+      _pagePadTop = sp.getDouble('reader_page_pad_top') ?? 6;
+      _pagePadBottom = sp.getDouble('reader_page_pad_bottom') ?? 8;
       _immersive = sp.getBool('reader_immersive') ?? false;
     });
     if (_bgSound) _startBgSound();
@@ -294,7 +309,10 @@ class _ReaderPageState extends State<ReaderPage>
           _content = content;
           _loading = false;
           _bookmarked = marked;
+          _scrollPercent = 0;
         });
+        // 上下滑动切章：滚动回顶部
+        if (_scrollCtrl.hasClients) _scrollCtrl.jumpTo(0);
       }
       _markRead(i); // 记录已读章节
       // 记录进度（含已读章标题，供书架卡片显示）
@@ -364,24 +382,6 @@ class _ReaderPageState extends State<ReaderPage>
                     ],
                   ),
                 const SizedBox(height: 12),
-                // 左右页边距（正文左右留白）
-                _sheetSlider('左右页边距', _pagePadH, 0, 60,
-                    label: '${_pagePadH.round()}',
-                    onChanged: (v) async {
-                  setState(() => _pagePadH = v);
-                  setSheet(() => _pagePadH = v);
-                  final sp = await SharedPreferences.getInstance();
-                  await sp.setDouble('reader_page_pad', v);
-                }),
-                // 上下页边距（正文上下留白）
-                _sheetSlider('上下页边距', _pagePadV, 0, 80,
-                    label: '${_pagePadV.round()}',
-                    onChanged: (v) async {
-                  setState(() => _pagePadV = v);
-                  setSheet(() => _pagePadV = v);
-                  final sp = await SharedPreferences.getInstance();
-                  await sp.setDouble('reader_page_pad_v', v);
-                }),
                 // 沉浸阅读（隐藏状态栏）
                 Row(
                   children: [
@@ -406,35 +406,6 @@ class _ReaderPageState extends State<ReaderPage>
                   ],
                 ),
                 const SizedBox(height: 12),
-                // 翻页效果
-                Row(
-                  children: [
-                    const Text('翻页'),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Wrap(
-                        spacing: 6,
-                        children: [
-                          for (var i = 0; i < ReaderPrefs.turnNames.length; i++)
-                            ChoiceChip(
-                              label: Text(ReaderPrefs.turnNames[i]),
-                              labelStyle: const TextStyle(fontSize: 12),
-                              visualDensity: VisualDensity.compact,
-                              selected: _turnMode == i,
-                              onSelected: (_) async {
-                                setState(() => _turnMode = i);
-                                setSheet(() => _turnMode = i);
-                                final sp =
-                                    await SharedPreferences.getInstance();
-                                await sp.setInt('reader_turn_mode', i);
-                              },
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
                 // 漫画：页漫 / 条漫
                 if (_content?.isComic == true)
                   SwitchListTile(
@@ -543,7 +514,7 @@ class _ReaderPageState extends State<ReaderPage>
                     setState(() {
                       _autoNight = v;
                       if (v && _isNightNow() && _bg.computeLuminance() > 0.3) {
-                        _bg = _bgOptions[3];
+                        _bg = _bgOptions[2]; // 夜间
                       }
                     });
                     setSheet(() {});
@@ -647,6 +618,118 @@ class _ReaderPageState extends State<ReaderPage>
                     final sp = await SharedPreferences.getInstance();
                     await sp.setDouble('reader_brightness', v);
                   }),
+                  const SizedBox(height: 12),
+                  // 壁纸：图案渐变样例
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                          padding: EdgeInsets.only(top: 8), child: Text('壁纸')),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (var i = 0;
+                                i < ReaderPrefs.wallpapers.length;
+                                i++)
+                              GestureDetector(
+                                onTap: () async {
+                                  final p =
+                                      await SharedPreferences.getInstance();
+                                  await p.setInt('reader_wallpaper', i);
+                                  await p.setString(
+                                      'reader_wallpaper_img', '');
+                                  setState(() {
+                                    _wallpaper = i;
+                                    _wallpaperImg = '';
+                                  });
+                                  setSheet(() {});
+                                },
+                                child: Container(
+                                  width: 40,
+                                  height: 28,
+                                  decoration: BoxDecoration(
+                                    gradient: i == 0
+                                        ? null
+                                        : LinearGradient(
+                                            colors: ReaderPrefs.wallpapers[i],
+                                            begin: Alignment.topLeft,
+                                            end: Alignment.bottomRight),
+                                    color: i == 0 ? Colors.white : null,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color:
+                                          _wallpaperImg.isEmpty &&
+                                                  _wallpaper == i
+                                              ? Colors.blue
+                                              : Colors.grey,
+                                      width:
+                                          _wallpaperImg.isEmpty &&
+                                                  _wallpaper == i
+                                              ? 2
+                                              : 1,
+                                    ),
+                                  ),
+                                  child: i == 0
+                                      ? const Icon(Icons.block,
+                                          size: 12, color: Colors.grey)
+                                      : null,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  // 自定义本地图片壁纸
+                  Row(
+                    children: [
+                      const Text('自定义图片'),
+                      const Spacer(),
+                      if (_wallpaperImg.isNotEmpty)
+                        IconButton(
+                          tooltip: '删除自定义壁纸',
+                          icon: const Icon(Icons.delete_outline,
+                              size: 20, color: Color(0xFFE5484D)),
+                          onPressed: () async {
+                            final p = await SharedPreferences.getInstance();
+                            await p.setString('reader_wallpaper_img', '');
+                            await p.setInt('reader_wallpaper', 0);
+                            setState(() {
+                              _wallpaperImg = '';
+                              _wallpaper = 0;
+                            });
+                            setSheet(() {});
+                          },
+                        ),
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          final path = await _pickWallpaperImage();
+                          if (path != null) {
+                            setState(() => _wallpaperImg = path);
+                            setSheet(() {});
+                          }
+                        },
+                        icon: const Icon(Icons.add_photo_alternate_outlined,
+                            size: 18),
+                        label: Text(
+                            _wallpaperImg.isEmpty ? '导入本地图片' : '更换图片'),
+                      ),
+                    ],
+                  ),
+                  if (_wallpaperImg.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.file(File(_wallpaperImg),
+                            height: 120,
+                            width: double.infinity,
+                            fit: BoxFit.cover),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -656,8 +739,25 @@ class _ReaderPageState extends State<ReaderPage>
     );
   }
 
-  /// 字体设置子面板：字号 / 行距 / 段距 / 字体族（从设置弹窗移出）
+  /// 选一张本地图片复制到应用文档目录，设为阅读壁纸，返回路径。
+  Future<String?> _pickWallpaperImage() async {
+    final res = await FilePicker.platform.pickFiles(type: FileType.image);
+    if (res == null || res.files.isEmpty) return null;
+    final src = res.files.single;
+    if (src.path == null) return null;
+    final dir = await getApplicationDocumentsDirectory();
+    final dest = File('${dir.path}/reader_wallpaper.png');
+    await File(src.path!).copy(dest.path);
+    final sp = await SharedPreferences.getInstance();
+    await sp.setString('reader_wallpaper_img', dest.path);
+    await sp.setInt('reader_wallpaper', 0);
+    return dest.path;
+  }
+
+  /// 字体设置子面板：字号 / 行距 / 段距 / 间距 / 翻页 / 字体族
   Future<void> _showFontSettings() async {
+    bool padOpen = false; // 「间距设置」展开
+    bool turnOpen = false; // 「翻页设置」展开
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -681,7 +781,7 @@ class _ReaderPageState extends State<ReaderPage>
                   Row(
                     children: [
                       const Expanded(
-                        child: Text('字体设置',
+                        child: Text('界面设置',
                             style: TextStyle(
                                 fontSize: 16, fontWeight: FontWeight.w700)),
                       ),
@@ -694,6 +794,7 @@ class _ReaderPageState extends State<ReaderPage>
                   ),
                   _sheetSlider('字号', _fontSize, 14, 28,
                       label: _fontSize.toStringAsFixed(0),
+                      divisions: 14,
                       onChanged: (v) async {
                     setState(() => _fontSize = v);
                     setSheet(() => _fontSize = v);
@@ -702,83 +803,96 @@ class _ReaderPageState extends State<ReaderPage>
                   }),
                   _sheetSlider('行距', _lineHeight, 1.0, 2.2,
                       label: _lineHeight.toStringAsFixed(2),
+                      divisions: 12,
                       onChanged: (v) async {
                     setState(() => _lineHeight = v);
                     setSheet(() => _lineHeight = v);
                     final sp = await SharedPreferences.getInstance();
                     await sp.setDouble('reader_line_height', v);
                   }),
-                  _sheetSlider('段距', _paraGap.toDouble(), 0, 3,
-                      label: _paraGap.toString(), onChanged: (v) async {
-                    setState(() => _paraGap = v.round());
-                    setSheet(() => _paraGap = v.round());
+                  _sheetSlider('段距', _paraGap, 0, 3,
+                      label: _paraGap.toStringAsFixed(1),
+                      divisions: 30,
+                      onChanged: (v) async {
+                    setState(() => _paraGap = v);
+                    setSheet(() => _paraGap = v);
                     final sp = await SharedPreferences.getInstance();
-                    await sp.setInt('reader_para_gap', v.round());
+                    await sp.setDouble('reader_para_gap', v);
                   }),
-                  // 段首缩进 / 两端对齐（排版，与字号行距同类）
-                  Row(
-                    children: [
-                      const Text('段首缩进'),
-                      const Spacer(),
-                      Switch(
-                        value: _indent,
+                  const SizedBox(height: 8),
+                  // 间距设置（可展开：左/右/上/下边距）
+                  _sheetSectionButton('间距设置', padOpen,
+                      onTap: () => setSheet(() => padOpen = !padOpen)),
+                  if (padOpen) ...[
+                    _sheetSlider('左边距', _pagePadLeft, 0, 60,
+                        label: '${_pagePadLeft.round()}',
                         onChanged: (v) async {
-                          setState(() => _indent = v);
-                          setSheet(() => _indent = v);
-                          final sp = await SharedPreferences.getInstance();
-                          await sp.setBool('reader_indent', v);
-                        },
-                      ),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      const Text('两端对齐'),
-                      const Spacer(),
-                      Switch(
-                        value: _justify,
+                      setState(() => _pagePadLeft = v);
+                      setSheet(() => _pagePadLeft = v);
+                      final sp = await SharedPreferences.getInstance();
+                      await sp.setDouble('reader_page_pad_left', v);
+                    }),
+                    _sheetSlider('右边距', _pagePadRight, 0, 60,
+                        label: '${_pagePadRight.round()}',
                         onChanged: (v) async {
-                          setState(() => _justify = v);
-                          setSheet(() => _justify = v);
-                          final sp = await SharedPreferences.getInstance();
-                          await sp.setBool('reader_justify', v);
-                        },
-                      ),
-                    ],
-                  ),
-                  // 字体族
-                  Row(
-                    children: [
-                      const Text('字体'),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Wrap(
-                          spacing: 6,
-                          children: [
-                            for (var i = 0;
-                                i < ReaderPrefs.fontNames.length;
-                                i++)
-                              ChoiceChip(
-                                label: Text(ReaderPrefs.fontNames[i]),
-                                labelStyle: const TextStyle(fontSize: 12),
-                                visualDensity: VisualDensity.compact,
-                                selected: ReaderPrefs.fontFamilies[i] ==
-                                    _fontFamily,
-                                onSelected: (_) async {
-                                  setState(() => _fontFamily =
-                                      ReaderPrefs.fontFamilies[i]);
-                                  setSheet(() => _fontFamily =
-                                      ReaderPrefs.fontFamilies[i]);
-                                  final sp =
-                                      await SharedPreferences.getInstance();
-                                  await sp.setInt('reader_font_index', i);
-                                },
-                              ),
-                          ],
+                      setState(() => _pagePadRight = v);
+                      setSheet(() => _pagePadRight = v);
+                      final sp = await SharedPreferences.getInstance();
+                      await sp.setDouble('reader_page_pad_right', v);
+                    }),
+                    _sheetSlider('上边距', _pagePadTop, 0, 60,
+                        label: '${_pagePadTop.round()}',
+                        onChanged: (v) async {
+                      setState(() => _pagePadTop = v);
+                      setSheet(() => _pagePadTop = v);
+                      final sp = await SharedPreferences.getInstance();
+                      await sp.setDouble('reader_page_pad_top', v);
+                    }),
+                    _sheetSlider('下边距', _pagePadBottom, 0, 60,
+                        label: '${_pagePadBottom.round()}',
+                        onChanged: (v) async {
+                      setState(() => _pagePadBottom = v);
+                      setSheet(() => _pagePadBottom = v);
+                      final sp = await SharedPreferences.getInstance();
+                      await sp.setDouble('reader_page_pad_bottom', v);
+                    }),
+                    const SizedBox(height: 4),
+                  ],
+                  const SizedBox(height: 4),
+                  // 翻页设置（可展开）
+                  _sheetSectionButton('翻页设置', turnOpen,
+                      onTap: () => setSheet(() => turnOpen = !turnOpen)),
+                  if (turnOpen) ...[
+                    Row(
+                      children: [
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Wrap(
+                            spacing: 6,
+                            children: [
+                              for (var i = 0;
+                                  i < ReaderPrefs.turnNames.length;
+                                  i++)
+                                ChoiceChip(
+                                  label: Text(ReaderPrefs.turnNames[i]),
+                                  labelStyle: const TextStyle(fontSize: 12),
+                                  visualDensity: VisualDensity.compact,
+                                  selected: _turnMode == i,
+                                  onSelected: (_) async {
+                                    setState(() => _turnMode = i);
+                                    setSheet(() => _turnMode = i);
+                                    final sp =
+                                        await SharedPreferences.getInstance();
+                                    await sp.setInt('reader_turn_mode', i);
+                                  },
+                                ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                  ],
                 ],
               ),
             ),
@@ -795,9 +909,12 @@ class _ReaderPageState extends State<ReaderPage>
     });
   }
 
-  /// 设置弹窗里的滑杆行（标题 + 滑杆）
+  /// 设置弹窗里的滑杆行（标题 + 滑杆）。
+  /// [divisions] 非空时滑杆按档位吸附，并拖动时显示数值气泡 [label]。
   Widget _sheetSlider(String title, double value, double min, double max,
-      {required String label, required ValueChanged<double> onChanged}) {
+      {required String label,
+      int? divisions,
+      required ValueChanged<double> onChanged}) {
     return Row(
       children: [
         Text(title),
@@ -806,11 +923,34 @@ class _ReaderPageState extends State<ReaderPage>
             value: value.clamp(min, max),
             min: min,
             max: max,
+            divisions: divisions,
             label: label,
             onChanged: onChanged,
           ),
         ),
       ],
+    );
+  }
+
+  /// 设置弹窗里可展开分组按钮（标题 + 折叠箭头）。
+  Widget _sheetSectionButton(String title, bool open,
+      {required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+        child: Row(
+          children: [
+            Text(title,
+                style: const TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            Icon(open ? Icons.expand_less : Icons.expand_more,
+                color: Colors.grey, size: 20),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1029,28 +1169,15 @@ class _ReaderPageState extends State<ReaderPage>
               bottom: false,
               child: Stack(
                 children: [
-                  // 呼出时：返回按钮（独立玻璃圆钮，不再整条毛玻璃）
+                  // 呼出时：返回按钮（统一玻璃圆钮样式）
                   _fadeBar(
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: Padding(
                         padding: const EdgeInsets.only(left: 8),
-                        child: InkWell(
-                          onTap: () => Navigator.of(context).pop(),
-                          customBorder: const CircleBorder(),
-                          child: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(
-                                  alpha: dark ? 0.20 : 0.45),
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                  color: Colors.white.withValues(alpha: 0.55),
-                                  width: 1),
-                            ),
-                            child: Icon(Icons.arrow_back, color: fg, size: 20),
-                          ),
-                        ),
+                        child: _roundBtn(Icons.arrow_back, '返回',
+                            () => Navigator.of(context).pop(),
+                            color: fg),
                       ),
                     ),
                   ),
@@ -1160,17 +1287,34 @@ class _ReaderPageState extends State<ReaderPage>
     );
   }
 
-  /// 独立玻璃胶囊：半透明白 + 圆角 + 高光描边（控件各自玻璃化，不占整条）。
-  /// [alpha] 越小越透；夜间背景用更低不透明度。
-  Widget _glassChip({required Widget child, required double alpha}) {
+  /// 独立玻璃胶囊：白 0.42 填充 + 毛玻璃 blur 8 + 圆角 + 描边 + 投影。
+  /// 样式与 _roundBtn / 设置弹窗 Glass 卡片统一。
+  Widget _glassChip({required Widget child}) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: alpha),
         borderRadius: BorderRadius.circular(22),
-        border:
-            Border.all(color: Colors.white.withValues(alpha: 0.55), width: 1),
+        border: Border.all(
+            color: Colors.white.withValues(alpha: 0.55), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
-      child: child,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(22),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.42),
+            ),
+            child: child,
+          ),
+        ),
+      ),
     );
   }
 
@@ -1199,8 +1343,8 @@ class _ReaderPageState extends State<ReaderPage>
       _next(); // 漫画保持整话翻
       return;
     }
-    if (_turnMode == 1) {
-      _coverFlip(1);
+    if (_turnMode == 2) {
+      _scrollPage(1); // 上下滑动：向下滚一屏
       return;
     }
     if (_pageIndex < _pages.length - 1) {
@@ -1218,8 +1362,8 @@ class _ReaderPageState extends State<ReaderPage>
       _prev(); // 漫画保持整话翻
       return;
     }
-    if (_turnMode == 1) {
-      _coverFlip(-1);
+    if (_turnMode == 2) {
+      _scrollPage(-1); // 上下滑动：向上滚一屏
       return;
     }
     if (_pageIndex > 0) {
@@ -1231,12 +1375,31 @@ class _ReaderPageState extends State<ReaderPage>
     }
   }
 
+  /// 上下滑动：滚动一屏（dir 1 下 / -1 上）
+  void _scrollPage(int dir) {
+    if (!_scrollCtrl.hasClients) return;
+    final pos = _scrollCtrl.position;
+    final target = (_scrollCtrl.offset + dir * pos.viewportDimension)
+        .clamp(0.0, pos.maxScrollExtent);
+    _scrollCtrl.animateTo(target,
+        duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
+  }
+
+  /// 上下滑动进度监听
+  void _onScrollChanged() {
+    if (!_scrollCtrl.hasClients) return;
+    final pos = _scrollCtrl.position;
+    final max = pos.maxScrollExtent;
+    final p = max <= 0 ? 0.0 : (pos.pixels / max).clamp(0.0, 1.0);
+    if ((p - _scrollPercent).abs() > 0.001) {
+      setState(() => _scrollPercent = p);
+    }
+  }
+
   /// 底部控制区：上一章 | 进度条 | 下一章 + 圆钮（目录/设置）。
   /// 各控件独立玻璃化（[ _glassChip ] / [_roundBtn]），不再用整条玻璃面板。
   Widget _bottomBar(Color fg) {
     final list = _list;
-    final dark = _effDark();
-    final alpha = dark ? 0.20 : 0.45;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1245,7 +1408,6 @@ class _ReaderPageState extends State<ReaderPage>
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             _glassChip(
-              alpha: alpha,
               child: TextButton(
                 onPressed: _index > 0 ? _prev : null,
                 child: Text('上一章', style: TextStyle(color: fg)),
@@ -1255,7 +1417,6 @@ class _ReaderPageState extends State<ReaderPage>
             // 进度条占剩余宽度自适应，避免窄屏 Row 溢出截断
             Expanded(
               child: _glassChip(
-                alpha: alpha,
                 child: Slider(
                   value: _sliderDrag ?? _index.toDouble(),
                   min: 0,
@@ -1272,7 +1433,6 @@ class _ReaderPageState extends State<ReaderPage>
             ),
             const SizedBox(width: 8),
             _glassChip(
-              alpha: alpha,
               child: TextButton(
                 onPressed: _index < list.length - 1 ? _next : null,
                 child: Text('下一章', style: TextStyle(color: fg)),
@@ -1287,7 +1447,7 @@ class _ReaderPageState extends State<ReaderPage>
           children: [
             _roundBtn(Icons.menu, '目录', _showToc),
             const SizedBox(width: 40),
-            _roundBtn(Icons.text_fields, '字体', _showFontSettings),
+            _roundBtn(Icons.tune, '界面', _showFontSettings),
             const SizedBox(width: 40),
             _roundBtn(Icons.palette_outlined, '背景', _showBackgroundSettings),
             const SizedBox(width: 40),
@@ -1298,36 +1458,45 @@ class _ReaderPageState extends State<ReaderPage>
     );
   }
 
-  /// 圆形玻璃按钮（图标 + 下方小字）
+  /// 圆形玻璃按钮（仅图标，长按显示提示）。
+  /// 样式与设置弹窗 Glass 卡片统一：白 0.42 填充 + 毛玻璃 blur 8 +
+  /// 白 0.55 描边 + 投影。
   Widget _roundBtn(IconData icon, String tip, VoidCallback onTap,
       {Color? color}) {
-    final dark = _effDark();
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          InkWell(
-            onTap: onTap,
-            customBorder: const CircleBorder(),
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: dark ? 0.20 : 0.45),
-                shape: BoxShape.circle,
-                border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.55), width: 1),
+      child: Tooltip(
+        message: tip,
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.55), width: 1),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.06),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: ClipOval(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.42),
+                  ),
+                  child: Icon(icon, color: color, size: 20),
+                ),
               ),
-              child: Icon(icon, color: color, size: 20),
             ),
           ),
-          const SizedBox(height: 2),
-          Text(
-            tip,
-            style: TextStyle(
-                fontSize: 10, color: (color ?? Colors.grey.shade600)),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -1710,7 +1879,17 @@ class _ReaderPageState extends State<ReaderPage>
         fontSize: _fontSize,
         height: _lineHeight,
         color: fg,
-        fontFamily: _fontFamily,
+      );
+
+  /// 当前章标题（无章节列表时为空）。
+  String get _chapterTitle => _list.isEmpty ? '' : _list[_index].title;
+
+  /// 每章第一页的大号加粗标题样式。
+  TextStyle _chapterTitleStyle(Color fg) => TextStyle(
+        fontSize: _fontSize + 4,
+        height: _lineHeight,
+        fontWeight: FontWeight.w700,
+        color: fg,
       );
 
   /// 正文分页视图：每屏一段文字（滑动 / 覆盖两种翻页效果）。
@@ -1719,61 +1898,189 @@ class _ReaderPageState extends State<ReaderPage>
       builder: (context, constraints) {
         final safeTop = MediaQuery.of(context).padding.top;
         final size = Size(
-          constraints.maxWidth - _pagePadH * 2,
-          constraints.maxHeight - safeTop - _headerH - _footerH - _pagePadV,
+          constraints.maxWidth - _pagePadLeft - _pagePadRight,
+          constraints.maxHeight -
+              safeTop -
+              _headerH -
+              _footerH -
+              16 - // 进度行下方固定留白（不随边距调节）
+              _pagePadTop -
+              _pagePadBottom,
         );
         _reflow(fg, size);
         if (_pages.isEmpty) {
           return const Center(child: CircularProgressIndicator());
         }
-        if (_turnMode == 1) return _buildCoverPager(fg);
-        return PageView.builder(
-          controller: _pageController,
-          reverse: _flipReverse,
-          physics: _noteMode
-              ? const NeverScrollableScrollPhysics()
-              : const PageScrollPhysics(),
-          itemCount: _pages.length,
-          onPageChanged: (i) => setState(() => _pageIndex = i),
-          itemBuilder: (context, i) => _pageText(i, fg),
-        );
+        switch (_turnMode) {
+          case 1:
+            return _buildVerticalPager(fg); // 上下平移
+          case 2:
+            return _buildScrollViewer(fg); // 上下滑动（连续滚动）
+          case 3:
+            return _buildFlipPager(fg); // 仿真翻页
+          default:
+            return _buildHorizontalPager(fg); // 左右平移
+        }
       },
     );
   }
 
-  /// 覆盖翻页：当前页固定，下一页从右（或反向）盖上来。点击左右 1/3 翻页。
-  Widget _buildCoverPager(Color fg) {
-    return AnimatedBuilder(
-      animation: _coverAnim,
-      builder: (context, _) {
-        final w = MediaQuery.of(context).size.width;
-        final s = _flipReverse ? -1.0 : 1.0;
-        final dx = (1 - _coverAnim.value) * w * s * _coverDir;
-        return Stack(
-          children: [
-            Positioned.fill(child: _pageText(_pageIndex, fg)),
-            if (_coverAnim.isAnimating)
-              Positioned.fill(
-                child: Transform.translate(
-                  offset: Offset(dx, 0),
-                  child: _pageText(_coverTarget, fg),
-                ),
-              ),
-          ],
-        );
-      },
+  /// 左右平移：水平 PageView（原滑动）
+  Widget _buildHorizontalPager(Color fg) {
+    return PageView.builder(
+      controller: _pageController,
+      reverse: _flipReverse,
+      physics: _noteMode
+          ? const NeverScrollableScrollPhysics()
+          : const PageScrollPhysics(),
+      itemCount: _pages.length,
+      onPageChanged: (i) => setState(() => _pageIndex = i),
+      itemBuilder: (context, i) => _pageText(i, fg),
     );
   }
 
-  /// 一屏正文（滑动 / 覆盖共用）
-  Widget _pageText(int i, Color fg) {
-    final text = Text(_pages[i],
-        style: _novelStyle(fg),
-        textAlign: _justify ? TextAlign.justify : TextAlign.start);
+  /// 上下平移：垂直 PageView
+  Widget _buildVerticalPager(Color fg) {
+    return PageView.builder(
+      controller: _pageController,
+      scrollDirection: Axis.vertical,
+      physics: _noteMode
+          ? const NeverScrollableScrollPhysics()
+          : const PageScrollPhysics(),
+      itemCount: _pages.length,
+      onPageChanged: (i) => setState(() => _pageIndex = i),
+      itemBuilder: (context, i) => _pageText(i, fg),
+    );
+  }
+
+  /// 上下滑动：整章连续滚动，不分页（页脚显示滚动百分比）
+  Widget _buildScrollViewer(Color fg) {
+    final paras = _decoratedParas(_content?.paras ?? const <String>[]);
+    final gapPx = (1 + _paraGap) * _fontSize * _lineHeight;
     final safeTop = MediaQuery.of(context).padding.top;
     return Padding(
       padding: EdgeInsets.fromLTRB(
-          _pagePadH, safeTop, _pagePadH, _pagePadV),
+          _pagePadLeft, safeTop, _pagePadRight, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _list.isEmpty ? '' : _list[_index].title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style:
+                TextStyle(fontSize: 12, color: fg.withValues(alpha: 0.55)),
+          ),
+          SizedBox(height: _pagePadTop),
+          Expanded(
+            child: SingleChildScrollView(
+              controller: _scrollCtrl,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 章首大号标题
+                  if (_chapterTitle.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Text(_chapterTitle,
+                          style: _chapterTitleStyle(fg)),
+                    ),
+                  for (var k = 0; k < paras.length; k++) ...[
+                    if (k > 0) SizedBox(height: gapPx),
+                    Text(
+                      paras[k],
+                      style: _novelStyle(fg),
+                      textAlign: _justify
+                          ? TextAlign.justify
+                          : TextAlign.start,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          SizedBox(height: _pagePadBottom),
+          Row(
+            children: [
+              Text(
+                _chapterPercentText(),
+                style: TextStyle(
+                    fontSize: 12, color: fg.withValues(alpha: 0.5)),
+              ),
+              const Spacer(),
+              Text(
+                '${(_scrollPercent * 100).round()}%',
+                style: TextStyle(
+                    fontSize: 12, color: fg.withValues(alpha: 0.5)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 仿真翻页：PageView 每页按偏移绕 Y 轴翻转
+  Widget _buildFlipPager(Color fg) {
+    return PageView.builder(
+      controller: _pageController,
+      physics: _noteMode
+          ? const NeverScrollableScrollPhysics()
+          : const PageScrollPhysics(),
+      itemCount: _pages.length,
+      onPageChanged: (i) => setState(() => _pageIndex = i),
+      itemBuilder: (context, i) => AnimatedBuilder(
+        animation: _pageController,
+        builder: (context, child) {
+          final page = _pageController.position.haveDimensions
+              ? (_pageController.page ?? _pageIndex.toDouble())
+              : _pageIndex.toDouble();
+          final delta = (page - i).clamp(-1.0, 1.0);
+          final angle = delta * -0.9; // 弧度
+          return Transform(
+            alignment: delta > 0
+                ? Alignment.centerLeft
+                : Alignment.centerRight,
+            transform: Matrix4.identity()
+              ..setEntry(3, 2, 0.0012)
+              ..rotateY(angle),
+            child: child,
+          );
+        },
+        child: _pageText(i, fg),
+      ),
+    );
+  }
+
+  /// 一屏正文（左右平移 / 上下平移 / 仿真翻页共用）
+  Widget _pageText(int i, Color fg) {
+    final page = i < _pages.length ? _pages[i] : null;
+    // 每章第一页：正文前显示大号加粗章节标题
+    final title = i == 0 ? _chapterTitle : '';
+    final body = page == null
+        ? const SizedBox()
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (title.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Text(title, style: _chapterTitleStyle(fg)),
+                ),
+              for (var k = 0; k < page.segs.length; k++) ...[
+                if (k > 0) SizedBox(height: page.gaps[k]),
+                Text(page.segs[k],
+                    style: _novelStyle(fg),
+                    textAlign: _justify
+                        ? TextAlign.justify
+                        : TextAlign.start),
+              ],
+            ],
+          );
+    final safeTop = MediaQuery.of(context).padding.top;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          _pagePadLeft, safeTop, _pagePadRight, 16),
       // 整页一体：页眉章节名 + 正文 + 页脚分页进度，随翻页一起动
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1785,7 +2092,7 @@ class _ReaderPageState extends State<ReaderPage>
             style: TextStyle(
                 fontSize: 12, color: fg.withValues(alpha: 0.55)),
           ),
-          const SizedBox(height: 6),
+          SizedBox(height: _pagePadTop),
           Expanded(
             child: Align(
               alignment: Alignment.topLeft,
@@ -1807,12 +2114,12 @@ class _ReaderPageState extends State<ReaderPage>
                           ...state.contextMenuButtonItems,
                         ],
                       ),
-                      child: text,
+                      child: body,
                     )
-                  : text,
+                  : body,
             ),
           ),
-          const SizedBox(height: 4),
+          SizedBox(height: _pagePadBottom),
           // 页脚：左整本进度，右本章分页进度（随页一体）
           Row(
             children: [
@@ -1834,28 +2141,6 @@ class _ReaderPageState extends State<ReaderPage>
     );
   }
 
-  /// 覆盖翻页：驱动动画，章首/章尾则切章。
-  void _coverFlip(int dir) {
-    final target = _pageIndex + dir;
-    if (target < 0 || target >= _pages.length) {
-      if (dir > 0) {
-        _pendingPage = 0;
-        _next();
-      } else {
-        _pendingPage = 1 << 30;
-        _prev();
-      }
-      return;
-    }
-    setState(() {
-      _coverTarget = target;
-      _coverDir = dir;
-    });
-    _coverAnim.forward(from: 0).whenComplete(() {
-      if (mounted) setState(() => _pageIndex = target);
-    });
-  }
-
   /// 重排分页：内容 / 字号 / 可用尺寸变化时重新计算 [pages]，
   /// 并按 [_pendingPage] 定位（跨章进入时跳到指定屏）。
   void _reflow(Color fg, Size size) {
@@ -1865,17 +2150,28 @@ class _ReaderPageState extends State<ReaderPage>
       _reflowKey = null;
       return;
     }
-    final gap = '\n' * (1 + _paraGap); // 段距：段落间空行数（基础 1 空行 + 调节）
-    final fullText = c.paras
-        .map((p) => '${_indent ? '　　' : ''}$p')
-        .join(gap);
-    final key = '$fullText|${_fontSize.toStringAsFixed(1)}|'
+    // 段距像素 = (基础 1 行 + 调节 _paraGap) × 行高
+    final gapPx = (1 + _paraGap) * _fontSize * _lineHeight;
+    final paras = _decoratedParas(c.paras);
+    // 每章第一页的大号标题：预留其高度，正文从标题下方开始
+    final title = _chapterTitle;
+    final titleStyle = _chapterTitleStyle(fg);
+    final titleH = title.isEmpty
+        ? 0.0
+        : (TextPainter(
+            text: TextSpan(text: title, style: titleStyle),
+            textDirection: TextDirection.ltr,
+          )..layout(maxWidth: size.width))
+            .height;
+    final key = '${paras.join('\n')}|$title|${_paraGap.toStringAsFixed(2)}|'
+        '${_fontSize.toStringAsFixed(1)}|'
         '${_lineHeight.toStringAsFixed(2)}|${_fontFamily ?? ''}|'
         '$_indent|$_justify|'
         '${size.width.toStringAsFixed(1)}|${size.height.toStringAsFixed(1)}';
     if (key == _reflowKey) return; // 未变，不重排
     _reflowKey = key;
-    _pages = _paginate(fullText, _novelStyle(fg), size, justify: _justify);
+    _pages = _paginateParas(paras, _novelStyle(fg), size, gapPx,
+        justify: _justify, firstPageReserve: titleH + 10);
     final target = _pendingPage ?? _pageIndex;
     _pendingPage = null;
     _pageIndex = target.clamp(0, _pages.length - 1);
@@ -1884,6 +2180,63 @@ class _ReaderPageState extends State<ReaderPage>
         _pageController.jumpToPage(_pageIndex);
       }
     });
+  }
+
+  /// 段首缩进装饰（缩进开启时每个段落前加两个全角空格）。
+  List<String> _decoratedParas(List<String> paras) =>
+      paras.map((p) => '${_indent ? '　　' : ''}$p').toList();
+
+  /// 按段落像素分页：每页存段落片段列表 + 各段前间距。
+  /// 段距可任意小数（SizedBox 像素），段落不跨页（单段超页高才截断）。
+  /// [firstPageReserve]：第一页顶部预留高度（每章大号标题），正文从标题下开始。
+  List<_NovelPage> _paginateParas(List<String> paras, TextStyle style,
+      Size size, double gapPx,
+      {bool justify = false, double firstPageReserve = 0}) {
+    final pages = <_NovelPage>[];
+    final segs = <String>[];
+    final gaps = <double>[];
+    var used = firstPageReserve; // 第一页预留标题高度
+    var isFirst = true;
+
+    void flush() {
+      if (segs.isEmpty) return;
+      pages.add(_NovelPage(List.of(segs), List.of(gaps)));
+      segs.clear();
+      gaps.clear();
+      used = 0;
+      isFirst = false;
+    }
+
+    for (final p in paras) {
+      if (p.trim().isEmpty) continue; // 空段落跳过
+      final tp = TextPainter(
+        text: TextSpan(text: p, style: style),
+        textDirection: TextDirection.ltr,
+        textAlign: justify ? TextAlign.justify : TextAlign.start,
+      )..layout(maxWidth: size.width);
+      final h = tp.height;
+      final need = h + (segs.isEmpty ? 0 : gapPx);
+      if (segs.isNotEmpty && used + need > size.height) flush();
+      // 第一页标题预留导致连一段都放不下 → 标题独占首页，正文从下一页开始
+      if (segs.isEmpty && isFirst && used + h > size.height) {
+        pages.add(_NovelPage(const [], const [0])); // 仅标题页
+        isFirst = false;
+        used = 0;
+      }
+      if (h > size.height) {
+        // 单段超一页：该段单独截断分页（复用 _paginate）
+        flush();
+        for (final part in _paginate(p, style, size, justify: justify)) {
+          pages.add(_NovelPage([part], [0]));
+        }
+        continue;
+      }
+      segs.add(p);
+      gaps.add(segs.length == 1 ? 0 : gapPx);
+      used += need;
+    }
+    flush();
+    return pages.isEmpty ? [_NovelPage([''], [0])] : pages;
   }
 
   /// 用 TextPainter 把整章文本按可用宽高分成多页（每页字符范围子串）。
@@ -1916,6 +2269,14 @@ class _ReaderPageState extends State<ReaderPage>
     if (start < fullText.length) pages.add(fullText.substring(start));
     return pages.isEmpty ? [fullText] : pages;
   }
+}
+
+/// 一页小说正文：段落片段列表 + 各段前间距（像素，首段为 0）。
+/// 段距任意小数通过 [SizedBox] 实现，替代整数空行。
+class _NovelPage {
+  final List<String> segs;
+  final List<double> gaps;
+  const _NovelPage(this.segs, this.gaps);
 }
 
 /// 漫画内容视图：条漫（竖滑）/ 页漫（左右翻）两种模式，均可双击缩放。
