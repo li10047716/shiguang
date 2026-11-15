@@ -98,8 +98,7 @@ jobs:
         with:
           name: ios-build
           path: |
-            build/ios/ipa/*.ipa
-            build/ios/iphoneos/*.app
             shiguang-unsigned.ipa
+            build/ios/ipa/*.ipa
           if-no-files-found: warn
 # retry-trigger 20261115
