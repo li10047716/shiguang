@@ -5,8 +5,6 @@
 /// （封面在左带「小说/漫画」角标，信息在右：书名/作者/已读/来源/最新章节）。
 library;
 
-import 'dart:ui';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -55,11 +53,8 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   Map<String, int> _times = {};
   static const _sortNames = ['最近阅读', '书名'];
 
-  // 顶部标题栏高度（列表顶部预留，滚动时卡片从标题下经过）
-  static const double _headerH = 96;
-  // 标题栏毛玻璃：列表滚过标题区时淡入，模糊背后卡片
+  // 书架网格滚动控制器（卡片列表用）
   final ScrollController _scrollCtrl = ScrollController();
-  bool _showBar = false;
 
   @override
   void initState() {
@@ -67,11 +62,6 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     ref.read(libraryProvider.notifier).load();
     _loadProgress();
     _loadGroups();
-    _scrollCtrl.addListener(() {
-      final off = _scrollCtrl.hasClients ? _scrollCtrl.offset : 0.0;
-      final show = off > 8; // 卡片刚进入标题区即显示毛玻璃
-      if (show != _showBar) setState(() => _showBar = show);
-    });
   }
 
   @override
@@ -96,50 +86,33 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
       autofocus: true,
       onKeyEvent: _onKey,
       child: Scaffold(
-      backgroundColor: Colors.transparent,
-      body: SafeArea(
-        child: Stack(
-          children: [
-            // 列表：顶部预留标题栏高度，滚动时卡片从标题下经过
-            Positioned.fill(
-              child: Padding(
-                padding: const EdgeInsets.only(top: _headerH),
+        backgroundColor: Colors.transparent,
+        body: SafeArea(
+          child: Stack(
+            children: [
+              // 书籍卡片铺满（顶部预留悬浮胶囊高度，避免首卡被压住）
+              Positioned.fill(
                 child: books.isEmpty ? _empty() : _grid(books),
               ),
-            ),
-            // 标题栏毛玻璃背景（滚动时淡入，模糊经过的卡片）
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: IgnorePointer(
-                child: AnimatedOpacity(
-                  opacity: _showBar ? 1 : 0,
-                  duration: const Duration(milliseconds: 180),
-                  child: ClipRect(
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                      child: Container(
-                        height: _headerH,
-                        color: Colors.white.withValues(alpha: 0.42),
-                      ),
-                    ),
+              // 右上角悬浮玻璃胶囊：全部▾ / 视图 / 搜索 / ⋮
+              if (!_manageMode)
+                Positioned(top: 12, right: 16, child: _topCapsule()),
+              // 管理模式顶部悬浮栏：返回 / 排序 / 清空 / 全选 / 删除
+              if (_manageMode)
+                Positioned(
+                  top: 12,
+                  left: 16,
+                  right: 16,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: _manageBar(),
                   ),
                 ),
-              ),
-            ),
-            // 标题栏（文字+胶囊常显，不随毛玻璃淡出）
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: _header(),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
   }
 
   /// Ctrl+F 打开搜索
@@ -719,281 +692,6 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     }
   }
 
-  // ---------- 顶部工具栏 ----------
-
-  Widget _header() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 20, 16, 12),
-      child: _manageMode ? _manageToolbar() : _normalToolbar(),
-    );
-  }
-
-  /// 独立玻璃胶囊/圆钮：悬浮半透明白 + 高光描边（不再用整条玻璃容器）。
-  Widget _chip({required Widget child, double alpha = 0.35, bool bordered = true}) {
-    return Container(
-      margin: const EdgeInsets.only(left: 4),
-      decoration: bordered
-          ? BoxDecoration(
-              color: Colors.white.withValues(alpha: alpha),
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.55), width: 1),
-            )
-          : null,
-      child: child,
-    );
-  }
-
-  /// 正常工具栏：书架标题（独立文字）+ 独立玻璃按钮（筛选/视图/搜索/更多）
-  Widget _normalToolbar() {
-    return Row(
-      children: [
-        const Text('书架',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700)),
-        const Spacer(),
-        // 液态玻璃椭圆胶囊：包住右上角 4 个按钮
-        Glass(
-          radius: 22,
-          blur: 18,
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-        // 全部▾ 筛选（类型 + 分组，样式同发现页书源选择）
-        _chip(
-          bordered: false,
-          child: GlassMenu(
-            width: 200,
-            items: [
-              GlassMenuItem(
-                label: '全部',
-                selected: _groupFilter == null && _filter == null,
-                onTap: () => setState(() {
-                  _filter = null;
-                  _groupFilter = null;
-                }),
-              ),
-              GlassMenuItem(
-                label: '小说',
-                selected: _filter == ContentType.novel && _groupFilter == null,
-                onTap: () => setState(() {
-                  _filter = ContentType.novel;
-                  _groupFilter = null;
-                }),
-              ),
-              GlassMenuItem(
-                label: '漫画',
-                selected: _filter == ContentType.comic && _groupFilter == null,
-                onTap: () => setState(() {
-                  _filter = ContentType.comic;
-                  _groupFilter = null;
-                }),
-              ),
-              GlassMenuItem(
-                label: '视频',
-                selected: _filter == ContentType.video && _groupFilter == null,
-                onTap: () => setState(() {
-                  _filter = ContentType.video;
-                  _groupFilter = null;
-                }),
-              ),
-              if (_groups.isNotEmpty)
-                const GlassMenuItem(label: '', divider: true),
-              for (final g in _groups)
-                GlassMenuItem(
-                  label: g,
-                  leadingIcon: Icons.folder_outlined,
-                  selected: _groupFilter == g,
-                  onTap: () => setState(() {
-                    _groupFilter = g;
-                    _filter = null;
-                  }),
-                ),
-              GlassMenuItem(
-                label: '新建分组',
-                leadingIcon: Icons.add,
-                onTap: _createGroupFromMenu,
-              ),
-            ],
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _groupFilter != null
-                        ? _groupFilter!
-                        : (_filter == null
-                            ? '全部'
-                            : (_filter == ContentType.novel
-                                ? '小说'
-                                : _filter == ContentType.comic
-                                    ? '漫画'
-                                    : '视频')),
-                    style: TextStyle(fontSize: 13, color: Colors.grey.shade800),
-                  ),
-                  Icon(Icons.arrow_drop_down,
-                      size: 16, color: Colors.grey.shade800),
-                ],
-              ),
-            ),
-          ),
-        ),
-        // 视图切换（无底框小图标）
-        _chip(
-          bordered: false,
-          child: IconButton(
-            tooltip: _listView ? '网格视图' : '列表视图',
-            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
-            padding: EdgeInsets.zero,
-            icon: Icon(_listView ? Icons.grid_view : Icons.view_list,
-                size: 22, color: Colors.grey.shade800),
-            onPressed: () => setState(() => _listView = !_listView),
-          ),
-        ),
-        // 搜索（无底框小图标）
-        _chip(
-          bordered: false,
-          child: IconButton(
-            tooltip: '搜索',
-            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
-            padding: EdgeInsets.zero,
-            icon: Icon(Icons.search, size: 22, color: Colors.grey.shade800),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SearchPage()),
-            ),
-          ),
-        ),
-        // 更多（无底框小图标下拉，样式同发现页书源选择）
-        _chip(
-          bordered: false,
-          child: GlassMenu(
-            items: [
-              GlassMenuItem(
-                label: '导入本地书',
-                leadingIcon: Icons.upload_file,
-                onTap: _importLocalBook,
-              ),
-              GlassMenuItem(
-                label: '分组管理',
-                leadingIcon: Icons.folder_outlined,
-                onTap: _showGroupManage,
-              ),
-              GlassMenuItem(
-                label: '书架管理',
-                leadingIcon: Icons.checklist,
-                onTap: _openManage,
-              ),
-            ],
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              child: Icon(Icons.more_vert,
-                  size: 22, color: Colors.grey.shade800),
-            ),
-          ),
-        ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// 管理模式工具栏：返回玻璃圆钮 + 标题 + 独立玻璃按钮（排序/清空/全选/删除）
-  Widget _manageToolbar() {
-    final all = ref.read(libraryProvider);
-    return Row(
-      children: [
-        // 返回（独立玻璃圆钮）
-        _chip(
-          child: IconButton(
-            tooltip: '退出管理',
-            icon: const Icon(Icons.arrow_back),
-            onPressed: _exitManage,
-          ),
-        ),
-        const SizedBox(width: 10),
-        const Text('书架管理',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-        const Spacer(),
-        // 排序（玻璃胶囊）
-        _chip(
-          child: PopupMenuButton<int>(
-            onSelected: (v) {
-              setState(() => _sortMode = v);
-              _applySort();
-            },
-            itemBuilder: (_) => List.generate(
-              _sortNames.length,
-              (i) => PopupMenuItem(
-                value: i,
-                child: Row(
-                  children: [
-                    if (_sortMode == i)
-                      const Icon(Icons.check,
-                          size: 16, color: Color(0xFF3E8EF7)),
-                    const SizedBox(width: 6),
-                    Text(_sortNames[i]),
-                  ],
-                ),
-              ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.sort, size: 18),
-                  const SizedBox(width: 4),
-                  Text(_sortMode == -1 ? '排序' : _sortNames[_sortMode],
-                      style: const TextStyle(fontSize: 13)),
-                  const Icon(Icons.arrow_drop_down, size: 18),
-                ],
-              ),
-            ),
-          ),
-        ),
-        // 清空（玻璃胶囊）
-        _chip(
-          child: TextButton.icon(
-            onPressed: all.isEmpty ? null : _clearShelf,
-            icon: const Icon(Icons.delete_sweep_outlined, size: 18),
-            label: const Text('清空'),
-          ),
-        ),
-        // 全选（玻璃圆钮）
-        _chip(
-          child: IconButton(
-            tooltip: '全选/取消全选',
-            icon: Icon(
-              _mSelected.length == all.length && all.isNotEmpty
-                  ? Icons.deselect
-                  : Icons.select_all,
-            ),
-            onPressed: () => setState(() {
-              if (_mSelected.length == all.length && all.isNotEmpty) {
-                _mSelected.clear();
-              } else {
-                _mSelected.addAll(all.map((b) => b.bookUrl));
-              }
-            }),
-          ),
-        ),
-        // 删除（玻璃胶囊，红色主操作）
-        _chip(
-          child: TextButton.icon(
-            onPressed: _mSelected.isEmpty ? null : _deleteSelected,
-            style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFFE5484D),
-            ),
-            icon: const Icon(Icons.delete_outline, size: 16),
-            label:
-                Text(_mSelected.isEmpty ? '删除' : '删除${_mSelected.length}'),
-          ),
-        ),
-      ],
-    );
-  }
 
   // ---------- 内容 ----------
 
@@ -1012,13 +710,281 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     );
   }
 
+  /// 独立玻璃胶囊/圆钮：悬浮半透明白 + 高光描边。
+  Widget _chip({required Widget child, double alpha = 0.35, bool bordered = true}) {
+    return Container(
+      margin: const EdgeInsets.only(left: 4),
+      decoration: bordered
+          ? BoxDecoration(
+              color: Colors.white.withValues(alpha: alpha),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.55), width: 1),
+            )
+          : null,
+      child: child,
+    );
+  }
+
+  /// 右上角悬浮玻璃胶囊：全部▾筛选 / 视图切换 / 搜索 / ⋮更多。
+  Widget _topCapsule() {
+    return Glass(
+      radius: 22,
+      blur: 18,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 全部▾ 筛选（类型 + 分组）
+          _chip(
+            bordered: false,
+            child: GlassMenu(
+              width: 200,
+              items: [
+                GlassMenuItem(
+                  label: '全部',
+                  selected: _groupFilter == null && _filter == null,
+                  onTap: () => setState(() {
+                    _filter = null;
+                    _groupFilter = null;
+                  }),
+                ),
+                GlassMenuItem(
+                  label: '小说',
+                  selected:
+                      _filter == ContentType.novel && _groupFilter == null,
+                  onTap: () => setState(() {
+                    _filter = ContentType.novel;
+                    _groupFilter = null;
+                  }),
+                ),
+                GlassMenuItem(
+                  label: '漫画',
+                  selected:
+                      _filter == ContentType.comic && _groupFilter == null,
+                  onTap: () => setState(() {
+                    _filter = ContentType.comic;
+                    _groupFilter = null;
+                  }),
+                ),
+                GlassMenuItem(
+                  label: '视频',
+                  selected:
+                      _filter == ContentType.video && _groupFilter == null,
+                  onTap: () => setState(() {
+                    _filter = ContentType.video;
+                    _groupFilter = null;
+                  }),
+                ),
+                if (_groups.isNotEmpty)
+                  const GlassMenuItem(label: '', divider: true),
+                for (final g in _groups)
+                  GlassMenuItem(
+                    label: g,
+                    leadingIcon: Icons.folder_outlined,
+                    selected: _groupFilter == g,
+                    onTap: () => setState(() {
+                      _groupFilter = g;
+                      _filter = null;
+                    }),
+                  ),
+                GlassMenuItem(
+                  label: '新建分组',
+                  leadingIcon: Icons.add,
+                  onTap: _createGroupFromMenu,
+                ),
+              ],
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _groupFilter != null
+                          ? _groupFilter!
+                          : (_filter == null
+                              ? '全部'
+                              : (_filter == ContentType.novel
+                                  ? '小说'
+                                  : _filter == ContentType.comic
+                                      ? '漫画'
+                                      : '视频')),
+                      style:
+                          TextStyle(fontSize: 13, color: Colors.grey.shade800),
+                    ),
+                    Icon(Icons.arrow_drop_down,
+                        size: 16, color: Colors.grey.shade800),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          // 视图切换
+          _chip(
+            bordered: false,
+            child: IconButton(
+              tooltip: _listView ? '网格视图' : '列表视图',
+              constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+              padding: EdgeInsets.zero,
+              icon: Icon(_listView ? Icons.grid_view : Icons.view_list,
+                  size: 22, color: Colors.grey.shade800),
+              onPressed: () => setState(() => _listView = !_listView),
+            ),
+          ),
+          // 搜索
+          _chip(
+            bordered: false,
+            child: IconButton(
+              tooltip: '搜索',
+              constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+              padding: EdgeInsets.zero,
+              icon: Icon(Icons.search, size: 22, color: Colors.grey.shade800),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SearchPage()),
+              ),
+            ),
+          ),
+          // ⋮ 更多
+          _chip(
+            bordered: false,
+            child: GlassMenu(
+              items: [
+                GlassMenuItem(
+                  label: '导入本地书',
+                  leadingIcon: Icons.upload_file,
+                  onTap: _importLocalBook,
+                ),
+                GlassMenuItem(
+                  label: '分组管理',
+                  leadingIcon: Icons.folder_outlined,
+                  onTap: _showGroupManage,
+                ),
+                GlassMenuItem(
+                  label: '书架管理',
+                  leadingIcon: Icons.checklist,
+                  onTap: _openManage,
+                ),
+              ],
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                child: Icon(Icons.more_vert,
+                    size: 22, color: Colors.grey.shade800),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 管理模式顶部悬浮栏：返回 / 排序 / 清空 / 全选 / 删除。
+  Widget _manageBar() {
+    final all = ref.read(libraryProvider);
+    return Glass(
+      radius: 22,
+      blur: 18,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _chip(
+            child: IconButton(
+              tooltip: '退出管理',
+              icon: const Icon(Icons.arrow_back),
+              onPressed: _exitManage,
+            ),
+          ),
+          const SizedBox(width: 6),
+          // 排序
+          _chip(
+            child: PopupMenuButton<int>(
+              onSelected: (v) {
+                setState(() => _sortMode = v);
+                _applySort();
+              },
+              itemBuilder: (_) => List.generate(
+                _sortNames.length,
+                (i) => PopupMenuItem(
+                  value: i,
+                  child: Row(
+                    children: [
+                      if (_sortMode == i)
+                        const Icon(Icons.check,
+                            size: 16, color: Color(0xFF3E8EF7)),
+                      const SizedBox(width: 6),
+                      Text(_sortNames[i]),
+                    ],
+                  ),
+                ),
+              ),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.sort, size: 18),
+                    const SizedBox(width: 4),
+                    Text(_sortMode == -1 ? '排序' : _sortNames[_sortMode],
+                        style: const TextStyle(fontSize: 13)),
+                    const Icon(Icons.arrow_drop_down, size: 18),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          // 清空
+          _chip(
+            child: TextButton.icon(
+              onPressed: all.isEmpty ? null : _clearShelf,
+              icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+              label: const Text('清空'),
+            ),
+          ),
+          // 全选
+          _chip(
+            child: IconButton(
+              tooltip: '全选/取消全选',
+              icon: Icon(
+                _mSelected.length == all.length && all.isNotEmpty
+                    ? Icons.deselect
+                    : Icons.select_all,
+              ),
+              onPressed: () => setState(() {
+                if (_mSelected.length == all.length && all.isNotEmpty) {
+                  _mSelected.clear();
+                } else {
+                  _mSelected.addAll(all.map((b) => b.bookUrl));
+                }
+              }),
+            ),
+          ),
+          // 删除
+          _chip(
+            child: TextButton.icon(
+              onPressed: _mSelected.isEmpty ? null : _deleteSelected,
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFFE5484D),
+              ),
+              icon: const Icon(Icons.delete_outline, size: 16),
+              label:
+                  Text(_mSelected.isEmpty ? '删除' : '删除${_mSelected.length}'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _grid(List<Book> books) {
     // 管理模式：应用排序
     final display = _manageMode ? _sortedBooks(books) : books;
     if (_listView) {
       return ListView.builder(
         controller: _scrollCtrl,
-        padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
+        padding: const EdgeInsets.fromLTRB(24, 60, 24, 24),
         itemCount: display.length,
         itemBuilder: (context, i) => Padding(
           padding: const EdgeInsets.only(bottom: 12),

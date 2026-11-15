@@ -158,10 +158,15 @@ class _CoverImageState extends State<CoverImage> {
             );
           },
           errorBuilder: (_, _, _) {
-            // 字节截断导致解码失败：清缓存，重试一次
+            // 字节截断导致解码失败：清缓存，重试一次。
+            // errorBuilder 可能在 build 期间被调用，不能直接 setState
+            // （否则抛 "setState during build"，中断该帧后续挂载），
+            // 推迟到帧后再置重试标记。
             if (_attempt == 0) {
               _cache.remove('${widget.url}|0');
-              setState(() => _attempt = 1);
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) setState(() => _attempt = 1);
+              });
               return widget.loadingWidget ??
                   _SkeletonBox(
                     width: widget.width,

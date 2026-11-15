@@ -268,24 +268,28 @@ class _DiscoverPageState extends State<DiscoverPage>
       body: _sources.isEmpty
           ? const Center(child: Text('暂无支持发现的书源'))
           : SafeArea(
-              child: Column(
+              child: Stack(
                 children: [
-                  _toolbar(),
-                  // 分类行（榜单/分类 + 芯片）与书籍一体滚动（在 _body 内）
-                  Expanded(child: _body()),
+                  // 内容（分类行 + 芯片 + 书籍）铺满，顶部预留悬浮胶囊高度
+                  Positioned.fill(child: _body()),
+                  // 右上角悬浮玻璃胶囊：搜索 / 书源选择 / 刷新
+                  Positioned(top: 12, right: 16, child: _topCapsule()),
                 ],
               ),
             ),
     );
   }
 
-  // ---------- 顶部工具栏 ----------
+  // ---------- 顶部悬浮胶囊 ----------
 
-  Widget _toolbar() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-      // 三个按钮独立无底框（不再共用一个玻璃底框）
+  Widget _topCapsule() {
+    final s = _source!;
+    return Glass(
+      radius: 22,
+      blur: 18,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           // 搜索
           GlassRoundButton(
@@ -295,9 +299,28 @@ class _DiscoverPageState extends State<DiscoverPage>
               MaterialPageRoute(builder: (_) => const SearchPage()),
             ),
           ),
-          Expanded(
-            child: Center(
-              child: _sourceSelector(),
+          // 书源选择（文本 + 箭头，点击弹玻璃下拉）
+          GestureDetector(
+            key: _sourceKey,
+            onTap: _toggleSourceMenu,
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.menu_book,
+                      size: 16, color: Color(0xFFE5A13A)),
+                  const SizedBox(width: 6),
+                  Text(s.sourceName,
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey.shade800)),
+                  Icon(Icons.arrow_drop_down,
+                      size: 20, color: Colors.grey.shade800),
+                ],
+              ),
             ),
           ),
           // 刷新
@@ -307,33 +330,6 @@ class _DiscoverPageState extends State<DiscoverPage>
             onTap: _refresh,
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _sourceSelector() {
-    final s = _source!;
-    return GestureDetector(
-      key: _sourceKey,
-      onTap: _toggleSourceMenu,
-      child: Glass(
-        radius: 20,
-        blur: 18,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.menu_book, size: 16, color: Color(0xFFE5A13A)),
-            const SizedBox(width: 6),
-            Text(s.sourceName,
-                style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey.shade800)),
-            Icon(Icons.arrow_drop_down,
-                size: 20, color: Colors.grey.shade800),
-          ],
-        ),
       ),
     );
   }
@@ -576,10 +572,13 @@ class _DiscoverPageState extends State<DiscoverPage>
     }
     final isMobile = MediaQuery.of(context).size.width < 600;
     // 分类行与书籍一体滚动（分类不固定，随列表滚动）
-    return CustomScrollView(
-      controller: _scrollCtrl,
-      slivers: [
-        SliverToBoxAdapter(child: _sectionTabs()),
+    return Padding(
+      // 顶部预留悬浮胶囊高度，避免分类行被压住
+      padding: const EdgeInsets.only(top: 60),
+      child: CustomScrollView(
+        controller: _scrollCtrl,
+        slivers: [
+          SliverToBoxAdapter(child: _sectionTabs()),
         SliverToBoxAdapter(child: _chips()),
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
@@ -617,7 +616,8 @@ class _DiscoverPageState extends State<DiscoverPage>
                     ),
             ),
           ),
-      ],
+        ],
+      ),
     );
   }
 }

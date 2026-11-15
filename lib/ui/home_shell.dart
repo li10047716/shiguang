@@ -35,22 +35,20 @@ class _HomeShellState extends State<HomeShell> {
       body: Stack(
         children: [
           const Positioned.fill(child: GlassBackground()),
-          // 内容区：顶部/底部避让系统安全区（iPhone 刘海/Home 条），
-          // 底部再留出悬浮导航条高度，避免内容被遮挡
-          Padding(
-            padding: const EdgeInsets.only(bottom: 74),
-            child: SafeArea(
-              child: IndexedStack(
-                index: _index,
-                children: const [
-                  ShelfPage(),
-                  DiscoverPage(),
-                  MinePage(),
-                ],
-              ),
+          // 内容区：让内容延伸到屏幕底（悬浮导航条覆盖其上并模糊），
+          // 避免内容下缘到屏幕底之间露出裸渐变「遮罩带」。
+          // 各页（书架/发现/我的）自带 SafeArea 处理刘海/Home 条。
+          SafeArea(
+            child: IndexedStack(
+              index: _index,
+              children: const [
+                ShelfPage(),
+                DiscoverPage(),
+                MinePage(),
+              ],
             ),
           ),
-          // 底部悬浮毛玻璃导航条（iOS 液态玻璃，只包裹三个按钮并居中）
+          // 底部悬浮毛玻璃导航条（iOS 液态玻璃，悬浮覆盖在内容之上）
           Positioned(
             left: 0,
             right: 0,
