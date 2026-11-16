@@ -6,7 +6,6 @@ library;
 
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:file_picker/file_picker.dart';
@@ -93,8 +92,8 @@ class _ReaderPageState extends State<ReaderPage>
   bool _bgSound = false;
   // 目录面板用底部弹窗（与设置一致），不再用左侧 Drawer
 
-  /// 是否显示顶部/底部控制栏（点中间切换）
-  bool _showControls = true;
+  /// 是否显示顶部/底部控制栏（点中间切换）——进入时默认隐藏，沉浸式阅读
+  bool _showControls = false;
 
   /// 当前章节是否已加书签
   bool _bookmarked = false;
@@ -124,11 +123,9 @@ class _ReaderPageState extends State<ReaderPage>
   /// 目录面板：常驻树内缓存（打开只滑入，不重建列表 → 秒开）
   bool _tocOpen = false;
   final ScrollController _tocController = ScrollController();
-  // 目录面板状态：tab（0 目录/1 书签/2 笔记）、排序、过滤、书签/笔记列表
+  // 目录面板状态：tab（0 目录/1 书签/2 笔记）、排序、书签/笔记列表
   int _tocTab = 0;
   bool _tocReverse = false;
-  String _tocFilter = '';
-  final TextEditingController _tocSearchCtrl = TextEditingController();
   List<Bookmark> _tocBookmarks = const [];
   List<HighlightNote> _tocNotes = const [];
 
@@ -150,7 +147,6 @@ class _ReaderPageState extends State<ReaderPage>
     _bgPlayer.dispose();
     _pageController.dispose();
     _tocController.dispose();
-    _tocSearchCtrl.dispose();
     _scrollCtrl.dispose();
     _tick(); // 结算阅读时长
     // 退出阅读器：恢复系统状态栏显示
@@ -1270,34 +1266,25 @@ class _ReaderPageState extends State<ReaderPage>
     );
   }
 
-  /// 独立玻璃胶囊：白 0.42 填充 + 毛玻璃 blur 8 + 圆角 + 描边 + 投影。
+  /// 独立胶囊：不透明 surface + 圆角 + 淡描边 + 轻投影。
   /// 样式与 _roundBtn / 设置弹窗 Glass 卡片统一。
   Widget _glassChip({required Widget child}) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(22),
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
-            color: Colors.white.withValues(alpha: 0.55), width: 1),
+            color: cs.outlineVariant.withValues(alpha: 0.7), width: 1),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
+            color: cs.shadow.withValues(alpha: 0.12),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.42),
-            ),
-            child: child,
-          ),
-        ),
-      ),
+      child: child,
     );
   }
 
@@ -1442,10 +1429,11 @@ class _ReaderPageState extends State<ReaderPage>
   }
 
   /// 圆形玻璃按钮（仅图标，长按显示提示）。
-  /// 样式与设置弹窗 Glass 卡片统一：白 0.42 填充 + 毛玻璃 blur 8 +
-  /// 白 0.55 描边 + 投影。
+  /// 圆形图标按钮：不透明 surface + 淡描边 + 轻投影。
+  /// 样式与设置弹窗卡片统一。
   Widget _roundBtn(IconData icon, String tip, VoidCallback onTap,
       {Color? color}) {
+    final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6),
       child: Tooltip(
@@ -1456,27 +1444,20 @@ class _ReaderPageState extends State<ReaderPage>
           child: Container(
             decoration: BoxDecoration(
               shape: BoxShape.circle,
+              color: cs.surface,
               border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.55), width: 1),
+                  color: cs.outlineVariant.withValues(alpha: 0.7), width: 1),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.06),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
+                  color: cs.shadow.withValues(alpha: 0.12),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
                 ),
               ],
             ),
-            child: ClipOval(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.42),
-                  ),
-                  child: Icon(icon, color: color, size: 20),
-                ),
-              ),
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Icon(icon, color: color ?? cs.onSurface, size: 20),
             ),
           ),
         ),
@@ -1582,8 +1563,10 @@ class _ReaderPageState extends State<ReaderPage>
               child: Container(
                 padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: dark ? 0.08 : 0.55),
-                  borderRadius: BorderRadius.circular(22),
+                  color: dark
+                      ? const Color(0xFF2A2E38)
+                      : const Color(0xFFEEF1F6),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: Row(
                   children: [
@@ -1625,7 +1608,7 @@ class _ReaderPageState extends State<ReaderPage>
                   ],
                 ),
               ),
-            // 内容
+            // 内容（目录 tab 右侧带可拖动滑块）
             Expanded(
               child: _tocTab == 0
                   ? _tocChapterList(list, fg)
@@ -1633,32 +1616,6 @@ class _ReaderPageState extends State<ReaderPage>
                       ? _tocBookmarkList(fg)
                       : _tocNoteList(fg),
             ),
-            // 底部搜索（仅目录 tab）
-            if (_tocTab == 0)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
-                child: Container(
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: dark ? 0.08 : 0.85),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: TextField(
-                    controller: _tocSearchCtrl,
-                    decoration: InputDecoration(
-                      isDense: true,
-                      prefixIcon: Icon(Icons.search,
-                          size: 18, color: fg.withValues(alpha: 0.6)),
-                      hintText: '搜索标题',
-                      hintStyle: TextStyle(
-                          fontSize: 13, color: fg.withValues(alpha: 0.5)),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                    ),
-                    onChanged: (v) => setState(() => _tocFilter = v.trim()),
-                  ),
-                ),
-              ),
           ],
         ),
       ),
@@ -1695,56 +1652,68 @@ class _ReaderPageState extends State<ReaderPage>
     );
   }
 
-  /// 目录章节列表（支持正序/倒序 + 搜索过滤 + 当前章高亮 ✓）
+  /// 目录章节列表（正序/倒序 + 当前章高亮 ✓ + 右侧可拖动滑块快速跳转）
   Widget _tocChapterList(List<Chapter> list, Color fg) {
     final ordered = _tocReverse ? list.reversed.toList() : list;
-    final filtered = _tocFilter.isEmpty
-        ? ordered
-        : ordered
-            .where((c) =>
-                c.title.toLowerCase().contains(_tocFilter.toLowerCase()))
-            .toList();
-    if (filtered.isEmpty) {
-      return Center(
-        child: Text('没有匹配「$_tocFilter」的章节',
-            style: TextStyle(color: fg.withValues(alpha: 0.6))),
-      );
+    final count = ordered.length;
+    if (count == 0) {
+      return Center(child: Text('暂无章节', style: TextStyle(color: fg)));
     }
-    return ListView.builder(
-      controller: _tocController,
-      itemExtent: 48,
-      itemCount: filtered.length,
-      itemBuilder: (context, i) {
-        final c = filtered[i];
-        final allIndex = list.indexOf(c);
-        final selected = allIndex == _index;
-        return ListTile(
-          dense: true,
-          selected: selected,
-          selectedTileColor:
-              Theme.of(context).colorScheme.primaryContainer,
-          title: Text(
-            c.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-              color: selected
-                  ? Theme.of(context).colorScheme.primary
-                  : fg,
-            ),
+    final cs = Theme.of(context).colorScheme;
+    return Stack(
+      children: [
+        // 桌面端 Flutter 会自动给滚动视图加系统 Scrollbar，
+        // 与自定义滑块重叠成两条，这里禁用系统那条。
+        ScrollConfiguration(
+          behavior: _NoTocScrollbar(),
+          child: ListView.builder(
+            controller: _tocController,
+            itemExtent: 48,
+            itemCount: count,
+            padding: const EdgeInsets.only(right: 28),
+            itemBuilder: (context, i) {
+              final c = ordered[i];
+              final allIndex = list.indexOf(c);
+              final selected = allIndex == _index;
+              return ListTile(
+                dense: true,
+                selected: selected,
+                selectedTileColor: cs.primaryContainer,
+                title: Text(
+                  c.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                    color: selected ? cs.primary : fg,
+                  ),
+                ),
+                trailing: selected
+                    ? Icon(Icons.check, size: 16, color: cs.primary)
+                    : null,
+                onTap: () {
+                  setState(() => _tocOpen = false); // 关面板
+                  if (allIndex != _index) _loadChapter(allIndex);
+                },
+              );
+            },
           ),
-          trailing: selected
-              ? Icon(Icons.check,
-                  size: 16, color: Theme.of(context).colorScheme.primary)
-              : null,
-          onTap: () {
-            setState(() => _tocOpen = false); // 关面板
-            if (allIndex != _index) _loadChapter(allIndex);
-          },
-        );
-      },
+        ),
+        // 右侧可拖动滑块：竖直拖拽定位到对应章节
+        Positioned(
+          right: 2,
+          top: 0,
+          bottom: 0,
+          width: 26,
+          child: _TocScrollThumb(
+            itemCount: count,
+            itemExtent: 48,
+            controller: _tocController,
+            color: cs.primary.withValues(alpha: 0.55),
+          ),
+        ),
+      ],
     );
   }
 
@@ -2473,6 +2442,165 @@ class _LocalImageState extends State<_LocalImage> {
         if (widget.index < widget.total - 1) const Divider(height: 1),
       ],
     );
+  }
+}
+
+/// 目录右侧可拖动滑块：竖直拖拽把手，快速定位到对应章节。
+/// 位置与 ListView 的滚动偏移联动，松手后把手跟随列表滚动。
+class _TocScrollThumb extends StatefulWidget {
+  final int itemCount;
+  final double itemExtent;
+  final ScrollController controller;
+  final Color color;
+
+  const _TocScrollThumb({
+    required this.itemCount,
+    required this.itemExtent,
+    required this.controller,
+    required this.color,
+  });
+
+  @override
+  State<_TocScrollThumb> createState() => _TocScrollThumbState();
+}
+
+class _TocScrollThumbState extends State<_TocScrollThumb> {
+  double _grabOffset = 0;
+  // 滑块仅在滚动/拖动时出现，停止 1.2s 后自动淡出
+  bool _visible = false;
+  Timer? _hideTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onScroll);
+    _hideTimer?.cancel();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!mounted) return;
+    if (!_visible) setState(() => _visible = true);
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (mounted) setState(() => _visible = false);
+    });
+  }
+
+  double _clamp(double v, double min, double max) =>
+      v < min ? min : (v > max ? max : v);
+
+  /// 把全局坐标换算成滑块区域内的 y
+  double _localDy(BuildContext ctx, Offset global) {
+    final box = ctx.findRenderObject() as RenderBox?;
+    if (box == null) return 0;
+    return box.globalToLocal(global).dy;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final trackH = constraints.maxHeight;
+        final total = widget.itemCount * widget.itemExtent;
+        // 内容不足一屏：无需滑块
+        if (trackH <= 0 || total <= trackH) {
+          return const SizedBox.shrink();
+        }
+        final maxScroll = total - trackH;
+        final thumbH = _clamp(trackH * trackH / total, 36.0, trackH);
+        final travel = trackH - thumbH;
+
+        double thumbTop(double offset) => travel <= 0
+            ? 0
+            : _clamp(offset / maxScroll * travel, 0, travel);
+
+        void jumpFromDy(double dy) {
+          final newTop = _clamp(dy - _grabOffset - thumbH / 2, 0, travel);
+          final offset = travel <= 0 ? 0.0 : newTop / travel * maxScroll;
+          widget.controller.jumpTo(_clamp(offset, 0, maxScroll));
+        }
+
+        return AnimatedOpacity(
+          opacity: _visible ? 1 : 0,
+          duration: const Duration(milliseconds: 200),
+          child: IgnorePointer(
+            // 隐藏时不拦截右侧章节的点击/滚动
+            ignoring: !_visible,
+            child: AnimatedBuilder(
+              animation: widget.controller,
+              builder: (context, _) {
+                final offset = widget.controller.hasClients
+                    ? widget.controller.offset
+                    : 0.0;
+                final top = thumbTop(offset);
+                const thumbW = 14.0;
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onVerticalDragStart: (d) {
+                    final dy = _localDy(context, d.globalPosition);
+                    final curTop = thumbTop(widget.controller.offset);
+                    // 点在把手上：记录抓取偏移；点在轨道外：直接跳过去
+                    _grabOffset = (dy >= curTop && dy <= curTop + thumbH)
+                        ? dy - (curTop + thumbH / 2)
+                        : 0;
+                    jumpFromDy(dy);
+                  },
+                  onVerticalDragUpdate: (d) {
+                    jumpFromDy(_localDy(context, d.globalPosition));
+                  },
+                  onVerticalDragEnd: (_) {},
+                  child: Stack(
+                    children: [
+                      // 轨道
+                      Center(
+                        child: Container(
+                          width: 4,
+                          height: trackH - 8,
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      // 把手
+                      AnimatedPositioned(
+                        duration: const Duration(milliseconds: 60),
+                        left: (26 - thumbW) / 2,
+                        top: top,
+                        width: thumbW,
+                        height: thumbH,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: widget.color,
+                            borderRadius: BorderRadius.circular(thumbW / 2),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 目录列表专用滚动行为：屏蔽桌面端自动生成的系统滚动条，
+/// 只保留自定义的 [_TocScrollThumb]，避免右侧出现两条滑块。
+class _NoTocScrollbar extends ScrollBehavior {
+  @override
+  Widget buildScrollbar(
+      BuildContext context, Widget child, ScrollableDetails details) {
+    return child;
   }
 }
 

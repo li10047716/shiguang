@@ -1,39 +1,33 @@
-/// iOS 液态玻璃（liquid glass）风格的通用组件。
+/// Material 3 简约风格的通用组件。
 ///
-/// - [GlassBackground]：全屏柔和渐变底（玻璃需要背景可透）。
-/// - [Glass]：半透明白玻璃容器 + 高光描边 + 圆角，可选背景模糊。
-///   大量卡片用 `blur: 0`（仅半透明填充，省性能，透出渐变已有玻璃感）；
-///   常驻 chrome（侧栏/顶栏/胶囊）用 `blur: ~18` 出真实毛玻璃。
+/// - [GlassBackground]：全屏不透明底色（跟随主题 surfaceContainerLow）。
+/// - [Glass]：不透明 surface 卡片 + 淡描边 + 轻投影（Material 3 Card）。
+/// - [GlassRoundButton]：不透明 surface 圆形图标按钮。
+/// - [GlassDialog]：居中弹窗约束容器。
+///
+/// 说明：原为 iOS 液态玻璃风格（半透明 + 背景模糊 + 高光描边），现整体改为
+/// Material 3。为兼容所有调用点，保留了原有类名与参数（blur / tintOpacity
+/// 仅保留签名，不再产生毛玻璃或半透明效果）。
 library;
-
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
-/// 全屏柔和渐变背景（浅蓝 → 淡紫 → 薄荷）。
+/// 全屏不透明底色（Material 3 surfaceContainerLow）。
 class GlassBackground extends StatelessWidget {
   final Widget? child;
   const GlassBackground({super.key, this.child});
 
   @override
   Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: dark
-              ? const [Color(0xFF1E2330), Color(0xFF2A2233), Color(0xFF1E2B26)]
-              : const [Color(0xFFD9E8FF), Color(0xFFE9E3FF), Color(0xFFD8F2E6)],
-        ),
-      ),
+    final cs = Theme.of(context).colorScheme;
+    return ColoredBox(
+      color: cs.surfaceContainerLow,
       child: child ?? const SizedBox.expand(),
     );
   }
 }
 
-/// 居中玻璃弹窗容器。
+/// 居中弹窗容器。
 ///
 /// `showDialog` 的 builder 若直接返回 [Glass]，会因路由页收到全屏紧约束而
 /// 铺满整个窗口。用 [Center] 松绑 + [ConstrainedBox] 限宽，得到居中弹窗。
@@ -65,7 +59,7 @@ class GlassDialog extends StatelessWidget {
   }
 }
 
-/// 玻璃圆钮：白 0.16 填充 + 毛玻璃 blur 3 + 高光描边 + 软投影。
+/// Material 3 圆形图标按钮：不透明 surface 填充 + 淡描边 + 轻投影。
 /// 与阅读器控制栏圆钮同款，供各页顶部图标按钮统一使用。
 class GlassRoundButton extends StatelessWidget {
   final IconData icon;
@@ -89,6 +83,7 @@ class GlassRoundButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Tooltip(
       message: tooltip,
       child: InkWell(
@@ -97,30 +92,23 @@ class GlassRoundButton extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             shape: BoxShape.circle,
+            color: cs.surface,
             border: Border.all(
-                color: Colors.white.withValues(alpha: 0.4), width: 1),
+              color: cs.outlineVariant.withValues(alpha: 0.6), width: 1),
             boxShadow: shadow
                 ? [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.10),
-                      blurRadius: 9,
-                      offset: const Offset(0, 4),
+                      color: cs.shadow.withValues(alpha: 0.12),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
                     ),
                   ]
                 : const [],
           ),
-          child: ClipOval(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 3, sigmaY: 3),
-              child: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.28),
-                ),
-                child: Icon(icon,
-                    size: iconSize, color: color ?? Colors.grey.shade800),
-              ),
-            ),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Icon(icon,
+                size: iconSize, color: color ?? cs.onSurface),
           ),
         ),
       ),
@@ -128,7 +116,7 @@ class GlassRoundButton extends StatelessWidget {
   }
 }
 
-/// 液态玻璃容器。
+/// Material 3 卡片容器：不透明 surface + 淡描边 + 轻投影。
 class Glass extends StatelessWidget {
   final Widget child;
   final double radius;
@@ -153,42 +141,26 @@ class Glass extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fill = Container(
+    final cs = Theme.of(context).colorScheme;
+    return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: tintOpacity),
-        borderRadius: BorderRadius.circular(radius),
-      ),
-      child: child,
-    );
-
-    Widget inner = fill;
-    if (blur > 0) {
-      inner = ClipRRect(
-        borderRadius: BorderRadius.circular(radius),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-          child: fill,
-        ),
-      );
-    }
-
-    return Container(
-      decoration: BoxDecoration(
+        color: cs.surface,
         borderRadius: BorderRadius.circular(radius),
         border: border ??
-            Border.all(color: Colors.white.withValues(alpha: 0.35), width: 1),
+            Border.all(
+              color: cs.outlineVariant.withValues(alpha: 0.6), width: 1),
         boxShadow: shadow
             ? [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.10),
-                  blurRadius: 9,
-                  offset: const Offset(0, 4),
+                  color: cs.shadow.withValues(alpha: 0.12),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
                 ),
               ]
             : const [],
       ),
-      child: inner,
+      child: child,
     );
   }
 }

@@ -498,15 +498,16 @@ class _DiscoverPageState extends State<DiscoverPage>
 
   Widget _sectionTab(String label, bool rank) {
     final active = rank == _sectionRank;
+    final cs = Theme.of(context).colorScheme;
     return GestureDetector(
       onTap: () => _pickSection(rank),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 7),
         decoration: BoxDecoration(
-          color: active ? _blue : Colors.white.withValues(alpha: 0.5),
+          color: active ? cs.primary : cs.surfaceContainerHigh,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: active ? _blue : Colors.white.withValues(alpha: 0.5),
+            color: active ? cs.primary : cs.outlineVariant,
           ),
         ),
         child: Text(
@@ -514,7 +515,7 @@ class _DiscoverPageState extends State<DiscoverPage>
           style: TextStyle(
             fontSize: 14,
             fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-            color: active ? Colors.white : Colors.grey.shade600,
+            color: active ? cs.onPrimary : cs.onSurfaceVariant,
           ),
         ),
       ),
@@ -526,6 +527,7 @@ class _DiscoverPageState extends State<DiscoverPage>
   Widget _chips() {
     final tabs = _sectionRank ? _ranks : _cats;
     if (tabs.isEmpty) return const SizedBox.shrink();
+    final cs = Theme.of(context).colorScheme;
     return Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -537,14 +539,10 @@ class _DiscoverPageState extends State<DiscoverPage>
               padding: const EdgeInsets.symmetric(
                   horizontal: 14, vertical: 7),
               decoration: BoxDecoration(
-                color: t == _tab
-                    ? _blue
-                    : Colors.white.withValues(alpha: 0.5),
+                color: t == _tab ? cs.primary : cs.surfaceContainerHigh,
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(
-                  color: t == _tab
-                      ? _blue
-                      : Colors.white.withValues(alpha: 0.5),
+                  color: t == _tab ? cs.primary : cs.outlineVariant,
                 ),
               ),
               child: Text(
@@ -554,7 +552,7 @@ class _DiscoverPageState extends State<DiscoverPage>
                   fontWeight:
                       t == _tab ? FontWeight.w600 : FontWeight.w400,
                   color:
-                      t == _tab ? Colors.white : Colors.grey.shade700,
+                      t == _tab ? cs.onPrimary : cs.onSurfaceVariant,
                 ),
               ),
             ),

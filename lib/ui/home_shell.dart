@@ -1,7 +1,7 @@
-/// 应用外壳：底部玻璃导航（书架 / 发现 / 我的）+ 内容区。
+/// 应用外壳：底部导航（书架 / 发现 / 我的）+ 内容区。
 ///
-/// iOS 液态玻璃风格：全局渐变底 + 底部悬浮毛玻璃导航条，
-/// 内容页用透明 Scaffold 透出背景。用 [IndexedStack] 保留各页状态。
+/// Material 3 简约风格：全局不透明底色 + 底部导航条，
+/// 用 [IndexedStack] 保留各页状态。
 library;
 
 import 'package:flutter/material.dart';
@@ -27,8 +27,6 @@ class _HomeShellState extends State<HomeShell> {
     (Icons.person_outline, Icons.person, '我的'),
   ];
 
-  static const _activeColor = Color(0xFF0088FF);
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -48,7 +46,7 @@ class _HomeShellState extends State<HomeShell> {
               ],
             ),
           ),
-          // 底部悬浮毛玻璃导航条（iOS 液态玻璃，悬浮覆盖在内容之上）
+          // 底部导航条（Material 3 不透明表面，悬浮覆盖在内容之上）
           Positioned(
             left: 0,
             right: 0,
@@ -62,12 +60,12 @@ class _HomeShellState extends State<HomeShell> {
 
   Widget _bottomNav() {
     const double itemW = 56; // 每项宽（图标+文字居中）
-    final inactiveColor = Colors.grey.shade600;
-    // 液态玻璃椭圆胶囊：包住三个导航按钮
+    final cs = Theme.of(context).colorScheme;
+    final activeColor = cs.primary;
+    final inactiveColor = cs.onSurfaceVariant;
     return Glass(
-      radius: 50,
-      blur: 3,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      radius: 28,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: Stack(
         children: [
           // 液态滑动指示器：选中高亮像液体一样弹性滑到新选中项。
@@ -84,8 +82,8 @@ class _HomeShellState extends State<HomeShell> {
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 4),
                 decoration: BoxDecoration(
-                  color: _activeColor.withValues(alpha: 0.28),
-                  borderRadius: BorderRadius.circular(50),
+                  color: cs.secondaryContainer,
+                  borderRadius: BorderRadius.circular(20),
                 ),
               ),
             ),
@@ -108,7 +106,7 @@ class _HomeShellState extends State<HomeShell> {
                         children: [
                           Icon(
                             i == _index ? _items[i].$2 : _items[i].$1,
-                            color: i == _index ? _activeColor : inactiveColor,
+                            color: i == _index ? activeColor : inactiveColor,
                             size: 26,
                           ),
                           const SizedBox(height: 3),
@@ -120,7 +118,7 @@ class _HomeShellState extends State<HomeShell> {
                                   ? FontWeight.w600
                                   : FontWeight.w400,
                               color:
-                                  i == _index ? _activeColor : inactiveColor,
+                                  i == _index ? activeColor : inactiveColor,
                             ),
                           ),
                         ],

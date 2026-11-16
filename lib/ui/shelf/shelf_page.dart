@@ -278,6 +278,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
 
   Widget _menuIcon(IconData icon, String label, VoidCallback onTap,
       {Color? color}) {
+    final cs = Theme.of(context).colorScheme;
     return GestureDetector(
       onTap: onTap,
       child: Column(
@@ -287,17 +288,17 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
             width: 46,
             height: 46,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.6),
+              color: cs.surfaceContainerHigh,
               shape: BoxShape.circle,
               border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.55), width: 1),
+                  color: cs.outlineVariant.withValues(alpha: 0.6), width: 1),
             ),
-            child: Icon(icon, size: 22, color: color ?? Colors.grey.shade700),
+            child: Icon(icon, size: 22, color: color ?? cs.onSurfaceVariant),
           ),
           const SizedBox(height: 6),
           Text(label,
               style: TextStyle(
-                  fontSize: 11, color: color ?? Colors.grey.shade700)),
+                  fontSize: 11, color: color ?? cs.onSurfaceVariant)),
         ],
       ),
     );
@@ -731,16 +732,17 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     );
   }
 
-  /// 独立玻璃胶囊/圆钮：悬浮半透明白 + 高光描边。
-  Widget _chip({required Widget child, double alpha = 0.35, bool bordered = true}) {
+  /// 独立胶囊/圆钮分割：不透明表面色 + 淡描边。
+  Widget _chip({required Widget child, bool bordered = true}) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.only(left: 4),
       decoration: bordered
           ? BoxDecoration(
-              color: Colors.white.withValues(alpha: alpha),
+              color: cs.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(22),
               border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.55), width: 1),
+                  color: cs.outlineVariant.withValues(alpha: 0.6), width: 1),
             )
           : null,
       child: child,
@@ -752,6 +754,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     return Glass(
       radius: 50,
       blur: 3,
+      tintOpacity: 0.9,
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1000,13 +1003,17 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   }
 
   Widget _grid(List<Book> books) {
-    // 管理模式：应用排序
-    final display = _manageMode ? _sortedBooks(books) : books;
+    // 管理模式：应用用户选的排序；普通模式：最近阅读的书置顶
+    final display = _manageMode
+        ? _sortedBooks(books)
+        : List<Book>.of(books)
+          ..sort((a, b) =>
+              (_times[b.bookUrl] ?? 0).compareTo(_times[a.bookUrl] ?? 0));
     if (_listView) {
       return ListView.builder(
         controller: _scrollCtrl,
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(24, 60, 24, 24),
+        padding: const EdgeInsets.fromLTRB(24, 84, 24, 24),
         itemCount: display.length,
         itemBuilder: (context, i) => Padding(
           padding: const EdgeInsets.only(bottom: 12),
@@ -1029,7 +1036,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     return GridView.builder(
       controller: _scrollCtrl,
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(24, 60, 24, 24),
+      padding: const EdgeInsets.fromLTRB(24, 84, 24, 24),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         // 手机屏窄：横向卡（封面左+信息右）3 列会挤到只剩一条缝，降为 1 列全宽
         crossAxisCount: isMobile ? 1 : 3,
@@ -1147,10 +1154,20 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   ///
   /// 进入阅读器后后台继续补全目录（[ReaderPage.chaptersProvider] 读取
   /// 增长中的章节列表），避免等待整本目录加载。
-  void _openDirect(Book book, int lastIndex) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => _QuickReader(book: book, initialIndex: lastIndex)),
+  void _openDirect(Book book, int lastIndex) async {
+    // 以 SharedPreferences 中的最新进度为准：从阅读器返回后本页的 _progress
+    // 尚未刷新，直接用旧值会导致再次打开回到第一章。
+    final sp = await SharedPreferences.getInstance();
+    final saved = sp.getInt('$_progressPrefix${book.bookUrl}');
+    final index = saved ?? lastIndex;
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _QuickReader(book: book, initialIndex: index),
+      ),
     );
+    // 阅读器返回后重载进度，卡片进度条 / 已读章节同步更新。
+    if (mounted) _loadProgress();
   }
 
   // ---------- 操作 ----------
@@ -1525,11 +1542,10 @@ class _BookCard extends StatelessWidget {
                             width: 22,
                             height: 22,
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.85),
+                              color: Colors.white,
                               shape: BoxShape.circle,
                               border: Border.all(
-                                  color:
-                                      Colors.grey.withValues(alpha: 0.6),
+                                  color: Colors.grey.shade400,
                                   width: 1.5),
                               boxShadow: const [
                                 BoxShadow(

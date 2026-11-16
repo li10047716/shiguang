@@ -45,6 +45,7 @@ dependencies:
   media_kit: ^1.1.11      # 视频播放（libmpv）
   media_kit_video: ^1.2.5 # 视频播放 Widget
   media_kit_libs_video: ^1.0.5 # Windows libmpv 运行时
+  liquid_glass_easy: ^5.2.0
 
 dev_dependencies:
   flutter_test:

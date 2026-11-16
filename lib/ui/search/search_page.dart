@@ -1,6 +1,6 @@
 /// 搜索页：输入关键词 → 跳转聚合结果页
 ///
-/// iOS 液态玻璃风格：渐变底 + 玻璃搜索框。
+/// Material 3 简约风格：不透明底 + surface 搜索框。
 library;
 
 import 'package:flutter/material.dart';
@@ -72,17 +72,18 @@ class _SearchPageState extends State<SearchPage> {
     if (mounted) setState(() => _history = list);
   }
 
-  /// 白色圆形按钮（返回 / 三点）
+  /// 圆形图标按钮（返回 / 三点）
   Widget _roundBtn(IconData icon, String tip, VoidCallback onTap) {
+    final cs = Theme.of(context).colorScheme;
     return Material(
-      color: Colors.white.withValues(alpha: 0.9),
-      shape: const CircleBorder(),
+      color: cs.surface,
+      shape: CircleBorder(side: BorderSide(color: cs.outlineVariant)),
       child: InkWell(
         customBorder: const CircleBorder(),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(10),
-          child: Icon(icon, size: 20, color: Colors.grey.shade800),
+          child: Icon(icon, size: 20, color: cs.onSurface),
         ),
       ),
     );
@@ -215,18 +216,14 @@ class _SearchPageState extends State<SearchPage> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Container(
-                          height: 44,
+                          height: 46,
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.9),
-                            borderRadius: BorderRadius.circular(22),
-                            boxShadow: [
-                              BoxShadow(
-                                color:
-                                    Colors.black.withValues(alpha: 0.06),
-                                blurRadius: 10,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
+                            color: Theme.of(context).colorScheme.surface,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: Theme.of(context)
+                                  .colorScheme.outlineVariant,
+                            ),
                           ),
                           child: Row(
                             children: [
@@ -308,8 +305,11 @@ class _SearchPageState extends State<SearchPage> {
                               deleteIcon:
                                   const Icon(Icons.close, size: 14),
                               backgroundColor:
-                                  Colors.white.withValues(alpha: 0.9),
-                              side: BorderSide.none,
+                                  Theme.of(context).colorScheme.surfaceContainerHigh,
+                              side: BorderSide(
+                                color: Theme.of(context)
+                                    .colorScheme.outlineVariant,
+                              ),
                             ),
                         ],
                       ),
