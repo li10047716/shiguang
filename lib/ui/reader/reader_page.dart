@@ -2007,25 +2007,31 @@ class _ReaderPageState extends State<ReaderPage>
   /// 一屏正文（左右平移 / 上下平移 / 仿真翻页共用）
   Widget _pageText(int i, Color fg) {
     final page = i < _pages.length ? _pages[i] : null;
-    // 每章第一页：正文前显示大号加粗章节标题
-    final title = i == 0 ? _chapterTitle : '';
+    final lineH = _fontSize * _lineHeight;
+    // 每行固定 lineH 高度 + 段距按整数行渲染 → 每页行数一致、末行对齐
     final body = page == null
         ? const SizedBox()
         : Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (title.isNotEmpty)
+              if (page.title.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
-                  child: Text(title, style: _chapterTitleStyle(fg)),
+                  child: Text(page.title, style: _chapterTitleStyle(fg)),
                 ),
               for (var k = 0; k < page.segs.length; k++) ...[
-                if (k > 0) SizedBox(height: page.gaps[k]),
-                Text(page.segs[k],
-                    style: _novelStyle(fg),
-                    textAlign: _justify
-                        ? TextAlign.justify
-                        : TextAlign.start),
+                if (page.gaps[k] > 0)
+                  SizedBox(height: page.gaps[k] * lineH),
+                SizedBox(
+                  height: lineH,
+                  child: Text(page.segs[k],
+                      maxLines: 1,
+                      overflow: TextOverflow.clip,
+                      style: _novelStyle(fg),
+                      textAlign: _justify
+                          ? TextAlign.justify
+                          : TextAlign.start),
+                ),
               ],
             ],
           );
@@ -2123,7 +2129,7 @@ class _ReaderPageState extends State<ReaderPage>
     if (key == _reflowKey) return; // 未变，不重排
     _reflowKey = key;
     _pages = _paginateParas(paras, _novelStyle(fg), size, gapPx,
-        justify: _justify, firstPageReserve: titleH + 10);
+        justify: _justify, firstPageReserve: titleH + 10, title: title);
     final target = _pendingPage ?? _pageIndex;
     _pendingPage = null;
     _pageIndex = target.clamp(0, _pages.length - 1);
@@ -2138,97 +2144,114 @@ class _ReaderPageState extends State<ReaderPage>
   List<String> _decoratedParas(List<String> paras) =>
       paras.map((p) => '${_indent ? '　　' : ''}$p').toList();
 
-  /// 按段落像素分页：每页存段落片段列表 + 各段前间距。
-  /// 段距可任意小数（SizedBox 像素），段落不跨页（单段超页高才截断）。
-  /// [firstPageReserve]：第一页顶部预留高度（每章大号标题），正文从标题下开始。
-  List<_NovelPage> _paginateParas(List<String> paras, TextStyle style,
-      Size size, double gapPx,
-      {bool justify = false, double firstPageReserve = 0}) {
-    final pages = <_NovelPage>[];
-    final segs = <String>[];
-    final gaps = <double>[];
-    var used = firstPageReserve; // 第一页预留标题高度
-    var isFirst = true;
-
-    void flush() {
-      if (segs.isEmpty) return;
-      pages.add(_NovelPage(List.of(segs), List.of(gaps)));
-      segs.clear();
-      gaps.clear();
-      used = 0;
-      isFirst = false;
-    }
-
-    for (final p in paras) {
-      if (p.trim().isEmpty) continue; // 空段落跳过
-      final tp = TextPainter(
-        text: TextSpan(text: p, style: style),
-        textDirection: TextDirection.ltr,
-        textAlign: justify ? TextAlign.justify : TextAlign.start,
-      )..layout(maxWidth: size.width);
-      final h = tp.height;
-      final need = h + (segs.isEmpty ? 0 : gapPx);
-      if (segs.isNotEmpty && used + need > size.height) flush();
-      // 第一页标题预留导致连一段都放不下 → 标题独占首页，正文从下一页开始
-      if (segs.isEmpty && isFirst && used + h > size.height) {
-        pages.add(_NovelPage(const [], const [0])); // 仅标题页
-        isFirst = false;
-        used = 0;
-      }
-      if (h > size.height) {
-        // 单段超一页：该段单独截断分页（复用 _paginate）
-        flush();
-        for (final part in _paginate(p, style, size, justify: justify)) {
-          pages.add(_NovelPage([part], [0]));
-        }
-        continue;
-      }
-      segs.add(p);
-      gaps.add(segs.length == 1 ? 0 : gapPx);
-      used += need;
-    }
-    flush();
-    return pages.isEmpty ? [_NovelPage([''], [0])] : pages;
-  }
-
-  /// 用 TextPainter 把整章文本按可用宽高分成多页（每页字符范围子串）。
-  List<String> _paginate(String fullText, TextStyle style, Size size,
-      {bool justify = false}) {
+  /// 把一个段落按渲染宽度拆成若干"行文本"。用一次 TextPainter.layout 的
+  /// line metrics + getPositionForOffset 定位行尾，避免逐字符测量。
+  /// 若切分结果与原文本（去换行）不一致，整段退回一行，保证不丢字。
+  List<String> _splitParaLines(
+      String text, TextStyle style, double maxWidth, bool justify) {
+    if (text.isEmpty) return const [''];
+    final clean = text.replaceAll('\n', '');
+    if (clean.isEmpty) return const [''];
     final tp = TextPainter(
-      text: TextSpan(text: fullText, style: style),
+      text: TextSpan(text: text, style: style),
       textDirection: TextDirection.ltr,
       textAlign: justify ? TextAlign.justify : TextAlign.start,
-    )..layout(maxWidth: size.width);
-    final lines = tp.computeLineMetrics();
-    if (lines.isEmpty) return [fullText];
-    final pages = <String>[];
+    )..layout(maxWidth: maxWidth);
+    final metrics = tp.computeLineMetrics();
+    if (metrics.isEmpty) return [clean];
+    final out = <String>[];
     var start = 0;
-    var used = 0.0;
-    for (final line in lines) {
-      final h = line.height;
-      if (used + h > size.height && used > 0) {
-        final cut = tp
-            .getPositionForOffset(Offset(0, line.baseline - line.ascent))
-            .offset;
-        if (cut > start) {
-          pages.add(fullText.substring(start, cut));
-          start = cut;
-          used = 0;
-        }
+    for (final m in metrics) {
+      var end = tp.getPositionForOffset(Offset(maxWidth, m.baseline)).offset;
+      if (end < start || end > text.length) end = text.length;
+      if (end == start && start < text.length) {
+        end = (start + 1).clamp(0, text.length);
       }
-      used += h;
+      final s = text.substring(start, end).replaceAll('\n', '');
+      if (s.isNotEmpty) out.add(s);
+      start = end;
     }
-    if (start < fullText.length) pages.add(fullText.substring(start));
-    return pages.isEmpty ? [fullText] : pages;
+    if (start < text.length) {
+      final s = text.substring(start).replaceAll('\n', '');
+      if (s.isNotEmpty) out.add(s);
+    }
+    if (out.join('') != clean) return [clean];
+    return out.isEmpty ? [clean] : out;
+  }
+
+  /// 按固定行数网格分页（段落可跨页）：每页恰好 pageRows 行，末行位置统一，
+  /// 于是各页正文末行到页脚进度行的距离一致。
+  /// 段距折算为整数行参与排版，页首不放置段前空行。
+  /// [firstPageReserve]：首页标题预留高度，折算成整数行从首页容量扣除。
+  List<_NovelPage> _paginateParas(List<String> paras, TextStyle style,
+      Size size, double gapPx,
+      {bool justify = false, double firstPageReserve = 0, String title = ''}) {
+    final lineH = (style.fontSize ?? 16) * (style.height ?? 1.0);
+    if (lineH <= 0) return [_NovelPage([''], [0])];
+    final pageRows = (size.height / lineH).floor().clamp(1, 10000);
+    final gapRows = (gapPx / lineH).round().clamp(0, 20);
+
+    // 拆成"行单元"：每行文本 + 段首行之前的空行数（首段为 0）
+    final units = <({String text, int gapBefore})>[];
+    var isFirstPara = true;
+    for (final p in paras) {
+      if (p.trim().isEmpty) continue;
+      final lines = _splitParaLines(p, style, size.width, justify);
+      for (var i = 0; i < lines.length; i++) {
+        units.add((
+          text: lines[i],
+          gapBefore: (i == 0 && !isFirstPara) ? gapRows : 0
+        ));
+      }
+      isFirstPara = false;
+    }
+    if (units.isEmpty) return [_NovelPage([''], [0])];
+
+    // 首页标题占用的行数（含标题下间距），向上取整保证正文不压到标题
+    final titleRows =
+        firstPageReserve > 0 ? (firstPageReserve / lineH).ceil() : 0;
+
+    final pages = <_NovelPage>[];
+    var idx = 0;
+    var first = true;
+    while (idx < units.length) {
+      final cap = (first ? pageRows - titleRows : pageRows).clamp(1, pageRows);
+      final segs = <String>[];
+      final gaps = <double>[]; // 存空行数（整数值），渲染时 × lineH
+      var used = 0;
+      while (idx < units.length) {
+        final u = units[idx];
+        // 页首不放置段前空行
+        final gap = segs.isEmpty ? 0 : u.gapBefore;
+        if (used + gap + 1 > cap) break;
+        segs.add(u.text);
+        gaps.add(gap.toDouble());
+        used += gap + 1;
+        idx++;
+      }
+      if (segs.isEmpty) {
+        // 极端：一行都放不下，强制放一行避免死循环
+        segs.add(units[idx].text);
+        gaps.add(0);
+        idx++;
+      }
+      pages.add(_NovelPage(segs, gaps,
+          title: first ? title : '', titleRows: first ? titleRows : 0));
+      first = false;
+    }
+    return pages;
   }
 }
 
-/// 一页小说正文：段落片段列表 + 各段前间距（像素，首段为 0）。
-/// 段距任意小数通过 [SizedBox] 实现，替代整数空行。
+/// 一页小说正文：行文本列表 + 各行前间距（像素，段首行带段距）。
+/// [title]/[titleRows]：首页标题及其占用的行数（正文从标题下方开始）。
 class _NovelPage {
   final List<String> segs;
   final List<double> gaps;
-  const _NovelPage(this.segs, this.gaps);
+  final String title;
+  final int titleRows;
+  const _NovelPage(this.segs, this.gaps,
+      {this.title = '', this.titleRows = 0});
 }
 
 /// 漫画内容视图：条漫（竖滑）/ 页漫（左右翻）两种模式，均可双击缩放。
