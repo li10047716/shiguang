@@ -352,11 +352,7 @@ class AliSource extends SourceBase {
     }
     if (paras.isEmpty) throw SourceException('这一章没有取到内容');
 
-    return Content(
-      title: title,
-      paras: paras,
-      kind: ContentType.novel,
-    );
+    return Content(title: title, paras: paras);
   }
 
   // ---------- 发现：官方榜单 ----------

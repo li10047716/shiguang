@@ -2,7 +2,7 @@
 ///
 /// 布局对应 shiguang 书架：顶部「书架」标题 + 右侧工具栏
 /// （全部▾筛选 / 网格·列表切换 / 搜索 / 更多），下方三列横向书卡
-/// （封面在左带「小说/漫画」角标，信息在右：书名/作者/已读/来源/最新章节）。
+/// （封面在左带「小说」角标，信息在右：书名/作者/已读/来源/最新章节）。
 library;
 
 import 'dart:async';
@@ -39,7 +39,6 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   static const _progressTitlePrefix = 'progress_title_';
   static const _progressTimePrefix = 'progress_time_';
 
-  ContentType? _filter; // null = 全部
   bool _listView = false;
   Map<String, int> _progress = {};
   Map<String, String> _progressTitles = {};
@@ -59,6 +58,18 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   // 书架网格滚动控制器（卡片列表用）
   final ScrollController _scrollCtrl = ScrollController();
 
+  // 下拉检查更新：书卡跟手下移 + 松手回弹
+  double _pullRaw = 0;
+  double _pullOffset = 0;
+  bool _pullReleasing = false;
+  bool _pullRefreshing = false;
+  Timer? _pullReleaseTimer;
+
+  /// 正在检查更新的书（bookUrl），用于封面转圈提示
+  final Set<String> _checkingBooks = {};
+  static const _pullMax = 96.0;
+  static const _pullTrigger = 60.0;
+
   @override
   void initState() {
     super.initState();
@@ -69,6 +80,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
 
   @override
   void dispose() {
+    _pullReleaseTimer?.cancel();
     _scrollCtrl.dispose();
     super.dispose();
   }
@@ -80,10 +92,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
       _loadProgress();
     });
 
-    final books = ref.watch(libraryProvider).where((b) {
-      return (_filter == null || b.type == _filter) &&
-          (_groupFilter == null || _groupOf[b.bookUrl] == _groupFilter);
-    }).toList();
+    final books = _visibleBooks(ref.watch(libraryProvider));
 
     return Focus(
       autofocus: true,
@@ -94,30 +103,115 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
           child: Stack(
             children: [
               // 书籍卡片铺满（顶部预留悬浮胶囊高度，避免首卡被压住）
-              // 下拉刷新：重载本地数据 + 后台检查更新
+              // 下拉检查更新：书卡跟手下移，松手回弹
               Positioned.fill(
                 child: books.isEmpty
                     ? _empty()
-                    : RefreshIndicator(
-                        onRefresh: _refreshShelf,
-                        child: ScrollConfiguration(
-                          // 桌面端默认鼠标拖拽不滚动，启用鼠标/触屏拖拽，
-                          // 才能产生过滚触发下拉刷新。
-                          behavior: ScrollConfiguration.of(context).copyWith(
-                            dragDevices: {
-                              PointerDeviceKind.touch,
-                              PointerDeviceKind.mouse,
-                              PointerDeviceKind.stylus,
-                              PointerDeviceKind.trackpad,
-                            },
+                    : NotificationListener<ScrollNotification>(
+                        onNotification: _onShelfPullNotification,
+                        child: AnimatedContainer(
+                          duration: _pullReleasing || _pullRefreshing
+                              ? const Duration(milliseconds: 220)
+                              : Duration.zero,
+                          curve: Curves.easeOut,
+                          transform:
+                              Matrix4.translationValues(0, _pullOffset, 0),
+                          child: ScrollConfiguration(
+                            // 桌面端默认鼠标拖拽不滚动，启用鼠标/触屏拖拽，
+                            // 才能在顶部产生跟手下拉效果。
+                            behavior: ScrollConfiguration.of(context).copyWith(
+                              dragDevices: {
+                                PointerDeviceKind.touch,
+                                PointerDeviceKind.mouse,
+                                PointerDeviceKind.stylus,
+                                PointerDeviceKind.trackpad,
+                              },
+                            ),
+                            child: _grid(books),
                           ),
-                          child: _grid(books),
                         ),
                       ),
               ),
-              // 右上角悬浮玻璃胶囊：全部▾ / 视图 / 搜索 / ⋮
+              // 下拉提示：文字浮在顶部空白处，书卡下移时渐显
+              if (_pullOffset > 2 || _pullRefreshing)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: AnimatedOpacity(
+                      opacity: _pullRefreshing
+                          ? 1
+                          : (_pullOffset / 40).clamp(0.0, 1.0),
+                      duration: const Duration(milliseconds: 100),
+                      child: Container(
+                        margin: const EdgeInsets.only(top: 10),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 7),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primary,
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (_pullRefreshing)
+                              SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color:
+                                      Theme.of(context).colorScheme.onPrimary,
+                                ),
+                              )
+                            else
+                              Icon(
+                                _pullRaw >= _pullTrigger
+                                    ? Icons.update
+                                    : Icons.keyboard_arrow_down,
+                                size: 16,
+                                color:
+                                    Theme.of(context).colorScheme.onPrimary,
+                              ),
+                            const SizedBox(width: 6),
+                            Text(
+                              _pullRefreshing
+                                  ? '正在检查更新…'
+                                  : _pullRaw >= _pullTrigger
+                                      ? '松开检查更新'
+                                      : '下拉检查更新',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color:
+                                    Theme.of(context).colorScheme.onPrimary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              // 顶部：左侧搜索框 + 右侧工具栏（全部▾ / 视图 / ⋮）
               if (!_manageMode)
-                Positioned(top: 12, right: 16, child: _topCapsule()),
+                Positioned(
+                  top: 12,
+                  left: 16,
+                  right: 16,
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: MediaQuery.of(context).size.width < 520
+                            ? 150
+                            : 240,
+                        child: _searchBox(),
+                      ),
+                      const Spacer(),
+                      _topCapsule(),
+                    ],
+                  ),
+                ),
               // 管理模式顶部悬浮栏：返回 / 排序 / 清空 / 全选 / 删除
               if (_manageMode)
                 Positioned(
@@ -136,7 +230,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     );
   }
 
-  /// Ctrl+F 打开搜索
+  /// Ctrl+F 打开书源搜索
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent &&
         event.logicalKey == LogicalKeyboardKey.keyF &&
@@ -178,7 +272,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
       context: context,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.transparent,
-      builder: (context) => Glass(
+      builder: (context) => FlatCard(
         radius: 24,
         blur: 3,
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
@@ -344,7 +438,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
       backgroundColor: Colors.transparent,
       barrierColor: Colors.transparent,
       builder: (context) => StatefulBuilder(
-        builder: (context, setSheet) => Glass(
+        builder: (context, setSheet) => FlatCard(
           radius: 24,
           blur: 3,
           padding: EdgeInsets.zero,
@@ -466,8 +560,8 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     return showDialog<String>(
       context: context,
       barrierColor: Colors.transparent,
-      builder: (context) => GlassDialog(
-        child: Glass(
+      builder: (context) => FlatDialog(
+        child: FlatCard(
           radius: 20,
           blur: 3,
           padding: const EdgeInsets.all(20),
@@ -537,9 +631,9 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     await showDialog<void>(
       context: context,
       barrierColor: Colors.transparent,
-      builder: (context) => GlassDialog(
+      builder: (context) => FlatDialog(
         maxWidth: 460,
-        child: Glass(
+        child: FlatCard(
           radius: 20,
           blur: 3,
           padding: const EdgeInsets.all(20),
@@ -631,8 +725,8 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     final name = await showDialog<String>(
       context: context,
       barrierColor: Colors.transparent,
-      builder: (context) => GlassDialog(
-        child: Glass(
+      builder: (context) => FlatDialog(
+        child: FlatCard(
           radius: 20,
           blur: 3,
           padding: const EdgeInsets.all(20),
@@ -749,16 +843,51 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     );
   }
 
-  /// 右上角悬浮玻璃胶囊：全部▾筛选 / 视图切换 / 搜索 / ⋮更多。
+  /// 顶部左侧搜索框：点击打开书源搜索页
+  Widget _searchBox() {
+    return FlatCard(
+      radius: 14,
+      shadow: false,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const SearchPage()),
+          ),
+          child: SizedBox(
+            height: 40,
+            child: Row(
+              children: [
+                const SizedBox(width: 12),
+                Icon(Icons.search, size: 18, color: Colors.grey.shade600),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    '搜索书源',
+                    style: TextStyle(fontSize: 14, color: Colors.grey),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 右上角悬浮工具栏：全部▾筛选 / 视图切换 / ⋮更多。
   Widget _topCapsule() {
-    return Glass(
-      radius: 50,
-      blur: 3,
-      tintOpacity: 0.9,
+    // 白色卡片框，与书籍卡片同底色，凸显工具栏层次
+    return FlatCard(
+      radius: 14,
+      shadow: false,
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
+      mainAxisSize: MainAxisSize.min,
+      children: [
           // 全部▾ 筛选（类型 + 分组）
           _chip(
             bordered: false,
@@ -767,38 +896,8 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
               items: [
                 GlassMenuItem(
                   label: '全部',
-                  selected: _groupFilter == null && _filter == null,
-                  onTap: () => setState(() {
-                    _filter = null;
-                    _groupFilter = null;
-                  }),
-                ),
-                GlassMenuItem(
-                  label: '小说',
-                  selected:
-                      _filter == ContentType.novel && _groupFilter == null,
-                  onTap: () => setState(() {
-                    _filter = ContentType.novel;
-                    _groupFilter = null;
-                  }),
-                ),
-                GlassMenuItem(
-                  label: '漫画',
-                  selected:
-                      _filter == ContentType.comic && _groupFilter == null,
-                  onTap: () => setState(() {
-                    _filter = ContentType.comic;
-                    _groupFilter = null;
-                  }),
-                ),
-                GlassMenuItem(
-                  label: '视频',
-                  selected:
-                      _filter == ContentType.video && _groupFilter == null,
-                  onTap: () => setState(() {
-                    _filter = ContentType.video;
-                    _groupFilter = null;
-                  }),
+                  selected: _groupFilter == null,
+                  onTap: () => setState(() => _groupFilter = null),
                 ),
                 if (_groups.isNotEmpty)
                   const GlassMenuItem(label: '', divider: true),
@@ -807,10 +906,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
                     label: g,
                     leadingIcon: Icons.folder_outlined,
                     selected: _groupFilter == g,
-                    onTap: () => setState(() {
-                      _groupFilter = g;
-                      _filter = null;
-                    }),
+                    onTap: () => setState(() => _groupFilter = g),
                   ),
                 GlassMenuItem(
                   label: '新建分组',
@@ -825,17 +921,14 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      _groupFilter != null
-                          ? _groupFilter!
-                          : (_filter == null
-                              ? '全部'
-                              : (_filter == ContentType.novel
-                                  ? '小说'
-                                  : _filter == ContentType.comic
-                                      ? '漫画'
-                                      : '视频')),
-                      style:
-                          TextStyle(fontSize: 13, color: Colors.grey.shade800),
+                      _groupFilter ?? '全部',
+                      // 与书籍卡片书名同款：15 / w700 / 同深色
+                      style: const TextStyle(
+                        fontSize: 15,
+                        height: 1.25,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF222222),
+                      ),
                     ),
                     Icon(Icons.arrow_drop_down,
                         size: 16, color: Colors.grey.shade800),
@@ -854,19 +947,6 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
               icon: Icon(_listView ? Icons.grid_view : Icons.view_list,
                   size: 22, color: Colors.grey.shade800),
               onPressed: () => setState(() => _listView = !_listView),
-            ),
-          ),
-          // 搜索
-          _chip(
-            bordered: false,
-            child: IconButton(
-              tooltip: '搜索',
-              constraints: const BoxConstraints.tightFor(width: 36, height: 36),
-              padding: EdgeInsets.zero,
-              icon: Icon(Icons.search, size: 22, color: Colors.grey.shade800),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const SearchPage()),
-              ),
             ),
           ),
           // ⋮ 更多
@@ -898,7 +978,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
               ),
             ),
           ),
-        ],
+      ],
       ),
     );
   }
@@ -906,13 +986,14 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   /// 管理模式顶部悬浮栏：返回 / 排序 / 清空 / 全选 / 删除。
   Widget _manageBar() {
     final all = ref.read(libraryProvider);
-    return Glass(
-      radius: 50,
-      blur: 3,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    // 白色卡片框，与书籍卡片同底色
+    return FlatCard(
+      radius: 14,
+      shadow: false,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
+      mainAxisSize: MainAxisSize.min,
+      children: [
           _chip(
             child: IconButton(
               tooltip: '退出管理',
@@ -997,23 +1078,35 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
                   Text(_mSelected.isEmpty ? '删除' : '删除${_mSelected.length}'),
             ),
           ),
-        ],
+      ],
       ),
     );
   }
 
-  Widget _grid(List<Book> books) {
-    // 管理模式：应用用户选的排序；普通模式：最近阅读的书置顶
-    final display = _manageMode
+  /// 当前分组过滤后的小说（未排序）
+  List<Book> _visibleBooks(List<Book> source) {
+    return source.where((b) {
+      return b.type == ContentType.novel &&
+          (_groupFilter == null || _groupOf[b.bookUrl] == _groupFilter);
+    }).toList();
+  }
+
+  /// 当前界面展示顺序：管理模式用用户排序；普通模式最近阅读置顶
+  List<Book> _displayOrder(List<Book> books) {
+    return _manageMode
         ? _sortedBooks(books)
         : List<Book>.of(books)
           ..sort((a, b) =>
               (_times[b.bookUrl] ?? 0).compareTo(_times[a.bookUrl] ?? 0));
+  }
+
+  Widget _grid(List<Book> books) {
+    final display = _displayOrder(books);
     if (_listView) {
       return ListView.builder(
         controller: _scrollCtrl,
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(24, 84, 24, 24),
+        padding: const EdgeInsets.fromLTRB(24, 72, 24, 24),
         itemCount: display.length,
         itemBuilder: (context, i) => Padding(
           padding: const EdgeInsets.only(bottom: 12),
@@ -1022,6 +1115,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
             progress: _progress,
             progressTitles: _progressTitles,
             times: _times,
+            checkingUpdate: _checkingBooks.contains(display[i].bookUrl),
             list: true,
             onOpen: _openDirect,
             onMenu: () => _showBookMenu(display[i]),
@@ -1036,7 +1130,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     return GridView.builder(
       controller: _scrollCtrl,
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(24, 84, 24, 24),
+      padding: const EdgeInsets.fromLTRB(24, 72, 24, 24),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         // 手机屏窄：横向卡（封面左+信息右）3 列会挤到只剩一条缝，降为 1 列全宽
         crossAxisCount: isMobile ? 1 : 3,
@@ -1050,6 +1144,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
         progress: _progress,
         progressTitles: _progressTitles,
         times: _times,
+        checkingUpdate: _checkingBooks.contains(display[i].bookUrl),
         list: false,
         onOpen: _openDirect,
         onMenu: () => _showBookMenu(display[i]),
@@ -1070,13 +1165,103 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     });
   }
 
+  // ---------- 下拉检查更新：跟手位移 / 松手回弹 ----------
+
+  bool _onShelfPullNotification(ScrollNotification n) {
+    if (n.depth != 0) return false;
+
+    if (n is ScrollStartNotification) {
+      if (!_pullRefreshing) {
+        _pullReleaseTimer?.cancel();
+        _pullRaw = 0;
+        _pullReleasing = false;
+      }
+      return false;
+    }
+
+    if (_pullRefreshing) return false;
+
+    if (n is OverscrollNotification) {
+      // 顶部继续下拉：Clamping 物理不会改变 pixels，overscroll 为负的原始拖拽量
+      if (n.metrics.pixels <= 0.5 && n.overscroll < 0) {
+        _pullRaw = (_pullRaw - n.overscroll).clamp(0.0, 160.0);
+        _syncPullOffset();
+      }
+      return false;
+    }
+
+    if (n is ScrollUpdateNotification) {
+      final delta = n.scrollDelta ?? 0;
+      final atTop = n.metrics.pixels <= 0.5;
+
+      if (atTop && delta < 0) {
+        // Bouncing 物理下 pixels 可直接变负，这里同样累计下拉量
+        _pullRaw = (_pullRaw - delta).clamp(0.0, 160.0);
+      } else if (_pullRaw > 0 && delta > 0) {
+        // 下拉后反向推回：同步收回位移
+        _pullRaw = (_pullRaw - delta).clamp(0.0, 160.0);
+      } else {
+        return false;
+      }
+
+      _syncPullOffset();
+      return false;
+    }
+
+    if (n is ScrollEndNotification) {
+      _finishShelfPull();
+      return false;
+    }
+    return false;
+  }
+
+  void _syncPullOffset() {
+    final next = (_pullRaw * 0.55).clamp(0.0, _pullMax);
+    if ((next - _pullOffset).abs() >= 0.5) {
+      setState(() => _pullOffset = next);
+    }
+  }
+
+  void _finishShelfPull() {
+    if (_pullRefreshing || _pullRaw <= 0) return;
+    final shouldRefresh = _pullRaw >= _pullTrigger;
+
+    _pullReleaseTimer?.cancel();
+    setState(() {
+      _pullReleasing = true;
+      _pullRaw = 0;
+      _pullOffset = 0;
+      if (shouldRefresh) _pullRefreshing = true;
+    });
+    _pullReleaseTimer = Timer(const Duration(milliseconds: 260), () {
+      if (mounted) setState(() => _pullReleasing = false);
+    });
+
+    if (shouldRefresh) _runShelfRefresh();
+  }
+
+  Future<void> _runShelfRefresh() async {
+    final started = DateTime.now();
+    try {
+      await _refreshShelf();
+      // 检查更新继续在后台跑，不阻塞提示消失
+      unawaited(_checkUpdatesAndNotify());
+    } finally {
+      // 本地书少时刷新会瞬间完成，保证提示至少可见一段时间；
+      // 检查耗时长也不会一直卡在“正在检查更新…”。
+      final left = const Duration(milliseconds: 700) -
+          DateTime.now().difference(started);
+      if (left > Duration.zero) await Future.delayed(left);
+      if (mounted) setState(() => _pullRefreshing = false);
+    }
+  }
+
   // ---------- 数据 ----------
 
-  // 下拉刷新：快速重载本地书 + 进度（不阻塞），后台再检查更新
+  // 下拉刷新：只重载本地书 + 进度（检查更新由 _runShelfRefresh 后台触发）
   Future<void> _refreshShelf() async {
     await ref.read(libraryProvider.notifier).load();
     await _loadProgress();
-    unawaited(_checkUpdatesAndNotify());
   }
 
   // 后台检查更新，完成后 SnackBar 提示
@@ -1094,15 +1279,17 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   }
 
   // 逐书拉目录对比章节数：首次记录基线，之后章节增多算有更新。
-  // 返回有更新的书数（漫画源复杂，暂跳过）。
+  // 返回有更新的小说数；本地书与无目录来源会跳过。
   Future<int> _checkUpdates() async {
-    final books = ref.read(libraryProvider);
+    // 按当前书架显示顺序检查：分组过滤 + 管理模式排序/最近阅读置顶
+    final books = _displayOrder(_visibleBooks(ref.read(libraryProvider)));
     final sp = await SharedPreferences.getInstance();
     var updated = 0;
     for (final b in books) {
       if (b.type != ContentType.novel) continue;
       final source = SourceRegistry().byId(b.sourceId);
       if (source == null) continue;
+      if (mounted) setState(() => _checkingBooks.add(b.bookUrl));
       try {
         final toc =
             await source.loadToc(b).timeout(const Duration(seconds: 15));
@@ -1111,7 +1298,10 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
         final oldCount = sp.getInt(oldKey);
         if (oldCount != null && newCount > oldCount) updated++;
         await sp.setInt(oldKey, newCount);
-      } catch (_) {}
+      } catch (_) {
+      } finally {
+        if (mounted) setState(() => _checkingBooks.remove(b.bookUrl));
+      }
     }
     return updated;
   }
@@ -1204,7 +1394,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
         .replaceAll(_sortedBooks(ref.read(libraryProvider)));
   }
 
-  /// 确认框：普通 AlertDialog 样式（不毛玻璃遮盖，浅色遮罩即可）
+  /// 确认框：普通 AlertDialog 样式（不加背景模糊，浅色遮罩即可）
   Future<bool> _confirm(String msg) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -1249,7 +1439,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   Future<void> _importLocalBook() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['txt', 'epub', 'cbz', 'zip'],
+      allowedExtensions: ['txt', 'epub'],
       withData: true,
     );
     final files = result?.files ?? const [];
@@ -1262,7 +1452,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
       await ref.read(libraryProvider.notifier).addToShelf(book);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已导入：${book.name}（${book.type == ContentType.comic ? "漫画" : "小说"}）')),
+          SnackBar(content: Text('已导入：${book.name}')),
         );
       }
     } catch (e) {
@@ -1287,6 +1477,9 @@ class _BookCard extends StatelessWidget {
   /// 最近阅读时间戳（progress_time_），供「X分钟前: 最新章节」显示
   final Map<String, int> times;
 
+  /// 正在检查更新：封面右下角显示转圈
+  final bool checkingUpdate;
+
   final bool list;
 
   /// 点击书籍（默认进入详情页；书架直读模式直接进阅读器）。
@@ -1305,6 +1498,7 @@ class _BookCard extends StatelessWidget {
     required this.progress,
     this.progressTitles = const {},
     this.times = const {},
+    this.checkingUpdate = false,
     required this.list,
     this.onOpen,
     this.onMenu,
@@ -1344,7 +1538,6 @@ class _BookCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = progress[book.bookUrl] ?? 0;
-    final isComic = book.type == ContentType.comic;
     final unread = _unread;
 
     Widget cover() {
@@ -1358,7 +1551,7 @@ class _BookCard extends StatelessWidget {
                 ? ColoredBox(
                     color: Colors.grey.shade200,
                     child: Icon(
-                      isComic ? Icons.image : Icons.menu_book,
+                      Icons.menu_book,
                       size: 32,
                       color: Colors.grey,
                     ),
@@ -1372,13 +1565,11 @@ class _BookCard extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                 decoration: BoxDecoration(
-                  color: isComic
-                      ? const Color(0xFF7C6FF0)
-                      : const Color(0xFFE5484D),
+                  color: const Color(0xFFE5484D),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  isComic ? '漫画' : '小说',
+                  '小说',
                   style: const TextStyle(
                       color: Colors.white,
                       fontSize: 10,
@@ -1386,6 +1577,27 @@ class _BookCard extends StatelessWidget {
                 ),
               ),
             ),
+            if (checkingUpdate)
+              Positioned(
+                right: 5,
+                bottom: 5,
+                child: Tooltip(
+                  message: '正在检查更新',
+                  child: Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
+                    ),
+                    padding: const EdgeInsets.all(4),
+                    child: const CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       );
@@ -1463,7 +1675,7 @@ class _BookCard extends StatelessWidget {
       );
     }
 
-    return Glass(
+    return FlatCard(
       radius: 10,
       border: manage && selected
           ? Border.all(color: const Color(0xFF3E8EF7), width: 2)
@@ -1504,7 +1716,12 @@ class _BookCard extends StatelessWidget {
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          SizedBox(width: 90, child: cover()),
+                          // 封面缩小并四周留白，不贴卡片边
+                          Padding(
+                            padding:
+                                const EdgeInsets.fromLTRB(10, 8, 0, 8),
+                            child: SizedBox(width: 76, child: cover()),
+                          ),
                           Expanded(child: info()),
                         ],
                       ),
@@ -1512,7 +1729,11 @@ class _BookCard extends StatelessWidget {
                   : Row(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        SizedBox(width: 86, child: cover()),
+                        // 封面缩小并四周留白，不贴卡片边（居中浮在卡片里）
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(10, 8, 0, 8),
+                          child: SizedBox(width: 72, child: cover()),
+                        ),
                         Expanded(child: info()),
                       ],
                     ),
@@ -1700,7 +1921,7 @@ class _QuickReaderState extends State<_QuickReader> {
     // 浅色渐变背景（避免透明 Scaffold 露出黑底），显示目录加载进度。
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: GlassBackground(
+      body: AppBackground(
         child: Center(
           child: _error != null
               ? Column(

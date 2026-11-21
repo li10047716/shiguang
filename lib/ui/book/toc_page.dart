@@ -209,7 +209,7 @@ class _TocPageState extends State<TocPage> {
       backgroundColor: Colors.transparent,
       body: Stack(
         children: [
-          const Positioned.fill(child: GlassBackground()),
+          const Positioned.fill(child: AppBackground()),
           SafeArea(
             child: Column(
               children: [
@@ -218,7 +218,7 @@ class _TocPageState extends State<TocPage> {
                   padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
                   child: Row(
                     children: [
-                      GlassRoundButton(
+                      FlatRoundButton(
                         icon: Icons.arrow_back,
                         tooltip: '返回',
                         onTap: () => Navigator.of(context).pop(),
@@ -233,7 +233,7 @@ class _TocPageState extends State<TocPage> {
                               fontSize: 17, fontWeight: FontWeight.w700),
                         ),
                       ),
-                      GlassRoundButton(
+                      FlatRoundButton(
                         icon: Icons.refresh,
                         tooltip: '刷新目录',
                         onTap: _refreshing ? null : () => _fetch(),
@@ -253,7 +253,7 @@ class _TocPageState extends State<TocPage> {
                     child: Row(
                       children: [
                         Expanded(
-                          child: Glass(
+                          child: FlatCard(
                             radius: 20,
                             blur: 3,
                             padding: const EdgeInsets.symmetric(
@@ -279,7 +279,7 @@ class _TocPageState extends State<TocPage> {
                         ),
                         if (_lastReadIndex > 0 && _filter.isEmpty) ...[
                           const SizedBox(width: 8),
-                          Glass(
+                          FlatCard(
                             radius: 20,
                             blur: 3,
                             child: TextButton(
@@ -317,7 +317,7 @@ class _TocPageState extends State<TocPage> {
                   Padding(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    child: Glass(
+                    child: FlatCard(
                       radius: 10,
                       padding: const EdgeInsets.all(10),
                       child: Text(_warning!,
@@ -388,10 +388,10 @@ class _TocPageState extends State<TocPage> {
       );
     }
 
-    // 整张目录放进一块玻璃面板
+    // 整张目录放进一块平面面板
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-      child: Glass(
+      child: FlatCard(
         radius: 16,
         blur: 0,
         padding: const EdgeInsets.symmetric(vertical: 4),

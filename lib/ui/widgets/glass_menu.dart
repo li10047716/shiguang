@@ -1,6 +1,6 @@
-/// 玻璃下拉菜单：锚点按钮 + 点击展开 Overlay 玻璃面板。
+/// 下拉菜单：锚点按钮 + 点击展开 Overlay 平面面板。
 ///
-/// 样式与发现页「书源选择」下拉一致：白色玻璃圆角面板、每项统一高 40、
+/// 样式与发现页「书源选择」下拉一致：白色圆角面板、每项统一高 40、
 /// 选中项浅蓝底 + 蓝字 + radio 图标；动作项可传 [GlassMenuItem.leadingIcon]。
 library;
 
@@ -107,7 +107,7 @@ class _GlassMenuState extends State<GlassMenu> {
           left: left,
           top: top.clamp(0.0, screen.height - menuH - 8),
           width: menuW,
-          child: Glass(
+          child: FlatCard(
             radius: 14,
             blur: 3,
             padding: const EdgeInsets.symmetric(vertical: 6),

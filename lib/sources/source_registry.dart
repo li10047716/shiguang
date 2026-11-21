@@ -1,7 +1,6 @@
 /// 书源注册表：统一管理所有 [NovelSource]。
 ///
-/// 混合架构的核心——规则引擎源（JSON）与硬编码源（native/ Dart 模块）
-/// 都在这里注册，前端通过 [all] / [enabledOfType] 拿统一接口，不区分来源。
+/// 小说书源注册表：规则引擎源与原生适配器统一由此管理。
 /// 对应 shiguang 的 `core.book()/chapter()` 按书号前缀分派。
 library;
 
@@ -12,13 +11,9 @@ import '../models/book_source.dart';
 import 'builtin/builtin_sources.dart';
 import 'native/ali.dart';
 import 'native/bc.dart';
-import 'native/daren.dart';
 import 'native/dq.dart';
-import 'native/gsh.dart';
-import 'native/huadudm.dart';
-import 'native/kuaikan.dart';
+import 'native/ik8.dart';
 import 'native/localbook.dart';
-import 'native/mkz.dart';
 import 'native/qm.dart';
 import 'native/shuqi.dart';
 import 'rule_source.dart';
@@ -39,7 +34,8 @@ class SourceRegistry with ChangeNotifier {
 
   /// 硬编码源（native/）的禁用集合：sourceId -> 是否禁用。
   /// 默认启用；书源管理里可开关，持久化到 SharedPreferences。
-  final Map<String, bool> _hardDisabled = {};
+  /// ik8（爱看吧）内容风格偏成人，默认关闭，用户自行开启。
+  final Map<String, bool> _hardDisabled = {'ik8': true};
 
   /// 规则引擎源：从 JSON 书源仓库加载
   void _loadRuleSources() {
@@ -55,18 +51,15 @@ class SourceRegistry with ChangeNotifier {
     _sources.add(DqSource());
     _sources.add(BcSource());
     _sources.add(AliSource());
-    _sources.add(MkzSource());
-    _sources.add(GshSource());
-    _sources.add(KuaikanSource());
-    _sources.add(DarenSource());
     _sources.add(LocalBookSource());
-    _sources.add(HuadudmSource());
+    _sources.add(Ik8Source()); // 爱看吧：默认关闭，用户按需开启
   }
 
   /// 异步加载硬编码源的启停状态（默认启用，不阻塞启动）
   void _loadHardEnabled() {
     SharedPreferences.getInstance().then((sp) {
       for (final s in _sources) {
+        if (s.sourceId == 'loc') continue; // 本地源始终启用，不读禁用状态
         if (SourceRepository().byId(s.sourceId) == null) {
           final enabled = sp.getBool('source_enabled_${s.sourceId}') ?? true;
           if (!enabled) _hardDisabled[s.sourceId] = true;
@@ -80,6 +73,8 @@ class SourceRegistry with ChangeNotifier {
 
   /// 是否启用：规则源看 SourceRepository 的 enabled；硬编码源读持久化状态
   bool _isEnabled(NovelSource s) {
+    // 本地导入源是内置功能，始终可用，避免误关后本地书打不开。
+    if (s.sourceId == 'loc') return true;
     final bs = SourceRepository().byId(s.sourceId);
     if (bs != null) return bs.enabled;
     return !(_hardDisabled[s.sourceId] ?? false);
@@ -87,6 +82,7 @@ class SourceRegistry with ChangeNotifier {
 
   /// 公开的启用状态查询（供书源管理界面用，同步）
   bool isEnabled(String sourceId) {
+    if (sourceId == 'loc') return true;
     final bs = SourceRepository().byId(sourceId);
     if (bs != null) return bs.enabled;
     return !(_hardDisabled[sourceId] ?? false);

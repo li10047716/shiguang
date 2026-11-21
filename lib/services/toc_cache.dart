@@ -92,4 +92,31 @@ class TocCache {
     final sp = await SharedPreferences.getInstance();
     await sp.remove(_key(bookUrl));
   }
+
+  /// 清空全部目录缓存，返回删除条数
+  static Future<int> clearAll() async {
+    final sp = await SharedPreferences.getInstance();
+    final keys = sp.getKeys().where((k) => k.startsWith(_prefix)).toList();
+    for (final k in keys) {
+      await sp.remove(k);
+    }
+    return keys.length;
+  }
+
+  /// 目录缓存占用字节数（粗略：UTF-8 字符串长度）
+  static Future<int> bytesUsed() async {
+    final sp = await SharedPreferences.getInstance();
+    var total = 0;
+    for (final k in sp.getKeys().where((k) => k.startsWith(_prefix))) {
+      final v = sp.getString(k);
+      if (v != null) total += utf8.encode(v).length;
+    }
+    return total;
+  }
+
+  /// 目录缓存条数
+  static Future<int> count() async {
+    final sp = await SharedPreferences.getInstance();
+    return sp.getKeys().where((k) => k.startsWith(_prefix)).length;
+  }
 }

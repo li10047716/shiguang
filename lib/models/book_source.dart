@@ -1,4 +1,4 @@
-/// 内容类型：小说 / 漫画 / 视频
+/// 内容类型保留旧值以兼容已保存书架数据；新版本仅支持小说。
 enum ContentType { novel, comic, video }
 
 /// 书源规则模型（类 Legado 的 JSON 规则书源）

@@ -84,6 +84,74 @@ const String builtinSourcesJson = r'''
     ]
   },
   {
+    "sourceName": "速读谷(备用)",
+    "sourceUrl": "https://www.sudugu520.com",
+    "sourceType": "novel",
+    "enabled": true,
+    "charset": "utf-8",
+    "search": {
+      "url": "https://www.sudugu520.com/i/sor.aspx?key={{key}}",
+      "method": "GET",
+      "charset": "utf-8",
+      "bookList": "div.item",
+      "name": ".itemtxt h3 a@text",
+      "author": ".itemtxt p a@text##^作者：\\s*##",
+      "cover": ".item img@src",
+      "bookUrl": ".itemtxt h3 a@href || .item > a@href",
+      "lastChapter": ".itemtxt ul li:first-child a@text"
+    },
+    "detail": {
+      "name": ".itemtxt h1 a@text",
+      "author": ".itemtxt p a@text##^作者：\\s*##",
+      "cover": ".item img@src",
+      "intro": "h2.op + .des@text",
+      "tocUrl": "",
+      "lastChapter": ".itemtxt ul li:first-child a@text"
+    },
+    "toc": {
+      "chapterList": "#list li a",
+      "chapterName": "text",
+      "chapterUrl": "href",
+      "nextTocUrl": "",
+      "pageUrlTemplate": "",
+      "pageCount": ""
+    },
+    "content": {
+      "content": ".con@html",
+      "nextContentUrl": ".prenext a:contains(下一页)@href",
+      "mergePages": true
+    },
+    "discover": [
+      {"key": "top", "name": "阅读排行", "isRank": true,
+       "url": "https://www.sudugu520.com/paihang/{{page}}.html", "cardList": "div.item",
+       "pageCount": "div.page span@text", "pageLinks": "a[href*='/paihang/']"},
+      {"key": "quanben", "name": "完结小说", "isRank": true,
+       "url": "https://www.sudugu520.com/wanjie/{{page}}.html", "cardList": "div.item",
+       "pageCount": "div.page span@text", "pageLinks": "a[href*='/wanjie/']"},
+      {"key": "xuanhuan", "name": "玄幻小说", "isRank": false,
+       "url": "https://www.sudugu520.com/xuanhuan/{{page}}.html", "cardList": "div.item",
+       "pageCount": "div.page span@text", "pageLinks": "a[href*='/xuanhuan/']"},
+      {"key": "xianxia", "name": "仙侠小说", "isRank": false,
+       "url": "https://www.sudugu520.com/xianxia/{{page}}.html", "cardList": "div.item",
+       "pageCount": "div.page span@text", "pageLinks": "a[href*='/xianxia/']"},
+      {"key": "dushi", "name": "都市小说", "isRank": false,
+       "url": "https://www.sudugu520.com/dushi/{{page}}.html", "cardList": "div.item",
+       "pageCount": "div.page span@text", "pageLinks": "a[href*='/dushi/']"},
+      {"key": "lishi", "name": "历史小说", "isRank": false,
+       "url": "https://www.sudugu520.com/lishi/{{page}}.html", "cardList": "div.item",
+       "pageCount": "div.page span@text", "pageLinks": "a[href*='/lishi/']"},
+      {"key": "junshi", "name": "军事小说", "isRank": false,
+       "url": "https://www.sudugu520.com/junshi/{{page}}.html", "cardList": "div.item",
+       "pageCount": "div.page span@text", "pageLinks": "a[href*='/junshi/']"},
+      {"key": "kehuan", "name": "科幻小说", "isRank": false,
+       "url": "https://www.sudugu520.com/kehuan/{{page}}.html", "cardList": "div.item",
+       "pageCount": "div.page span@text", "pageLinks": "a[href*='/kehuan/']"},
+      {"key": "yanqing", "name": "言情小说", "isRank": false,
+       "url": "https://www.sudugu520.com/yanqing/{{page}}.html", "cardList": "div.item",
+       "pageCount": "div.page span@text", "pageLinks": "a[href*='/yanqing/']"}
+    ]
+  },
+  {
     "sourceName": "全本小说网",
     "sourceUrl": "https://www.qbxs.net",
     "sourceType": "novel",
@@ -309,7 +377,7 @@ class SourceRepository {
       for (final c in sp.getStringList(_customKey) ?? const []) {
         try {
           final src = BookSource.fromJson(jsonDecode(c) as Map<String, dynamic>);
-          if (src.id.isEmpty) continue;
+          if (src.id.isEmpty || src.type != ContentType.novel) continue;
           _sources.removeWhere((s) => s.id == src.id);
           _sources.add(src);
           _customIds.add(src.id);
@@ -335,17 +403,19 @@ class SourceRepository {
     });
   }
 
-  /// 全部书源
-  List<BookSource> get all => List.unmodifiable(_sources);
+  /// 当前应用只暴露小说书源；旧漫画/视频源配置不删除，保留在本地数据中。
+  List<BookSource> get all => List.unmodifiable(
+      _sources.where((s) => s.type == ContentType.novel));
 
   /// 启用中的某类型书源
-  List<BookSource> enabledOfType(ContentType type) =>
-      _sources.where((s) => s.enabled && s.type == type).toList();
+  List<BookSource> enabledOfType(ContentType type) => type == ContentType.novel
+      ? _sources.where((s) => s.enabled && s.type == ContentType.novel).toList()
+      : const [];
 
   /// 按 id 查找
   BookSource? byId(String id) {
     for (final s in _sources) {
-      if (s.id == id) return s;
+      if (s.id == id && s.type == ContentType.novel) return s;
     }
     return null;
   }
@@ -360,7 +430,7 @@ class SourceRepository {
       try {
         final item = raw as Map<String, dynamic>;
         final src = BookSource.fromJson(item);
-        if (src.id.isEmpty) continue;
+        if (src.id.isEmpty || src.type != ContentType.novel) continue;
         _sources.removeWhere((s) => s.id == src.id); // 覆盖同 id
         _sources.add(src);
         _customIds.add(src.id);

@@ -12,6 +12,7 @@ import '../../services/toc_cache.dart';
 import '../../sources/source_registry.dart';
 import '../glass.dart';
 import '../reader/open_reader.dart';
+import '../widgets/cache_sheet.dart';
 import '../widgets/cover_image.dart';
 import 'toc_page.dart';
 
@@ -87,7 +88,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
             });
           }
 
-          return Glass(
+          return FlatCard(
             radius: 24,
             blur: 3,
             child: SizedBox(
@@ -215,8 +216,8 @@ class _BookDetailPageState extends State<BookDetailPage> {
     openReader(context, b, chapters, idx);
   }
 
-  /// 下载全书：取目录后逐章取正文并写盘（弹进度框，可取消）
-  Future<void> _downloadAll(Book b) async {
+  /// 打开缓存管理面板：取目录后用共享面板（缓存全书/后续/取消/清除）。
+  Future<void> _openCacheSheet(Book b) async {
     final chapters = await _loadChapters(b);
     if (chapters == null || chapters.isEmpty) {
       if (mounted) {
@@ -226,84 +227,21 @@ class _BookDetailPageState extends State<BookDetailPage> {
       }
       return;
     }
-    final source = SourceRegistry().byId(b.sourceId);
-    if (source == null) return;
     if (!mounted) return;
-    var cancelled = false;
-    var done = 0;
-    await showDialog(
+    await showModalBottomSheet(
       context: context,
-      barrierDismissible: false,
-      barrierColor: Colors.transparent,
-      builder: (dialogCtx) => StatefulBuilder(
-        builder: (dialogCtx, setDlg) {
-          WidgetsBinding.instance.addPostFrameCallback((_) async {
-            for (var i = 0; i < chapters.length; i++) {
-              if (cancelled || !dialogCtx.mounted) break;
-              try {
-                final c = await source.content(chapters[i]);
-                await ChapterCache.write(b.bookUrl, chapters[i].url, c);
-              } catch (_) {}
-              done++;
-              if (dialogCtx.mounted) setDlg(() {});
-            }
-            if (dialogCtx.mounted) Navigator.of(dialogCtx).pop();
-          });
-          return GlassDialog(
-            child: Glass(
-              radius: 20,
-              blur: 3,
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('下载全书',
-                      style: TextStyle(
-                          fontSize: 17, fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 12),
-                  Text('$done / ${chapters.length} 章'),
-                  const SizedBox(height: 12),
-                  LinearProgressIndicator(
-                    value:
-                        chapters.isEmpty ? 0 : done / chapters.length,
-                  ),
-                  const SizedBox(height: 12),
-                  TextButton(
-                    onPressed: () {
-                      cancelled = true;
-                      Navigator.of(dialogCtx).pop();
-                    },
-                    child: const Text('取消'),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => CacheSheet(
+        book: b,
+        chapters: () => chapters,
+        total: chapters.length,
+        currentIndex: 0,
       ),
     );
+    // 面板关闭后刷新已缓存数
     final count = await ChapterCache.bookCount(b.bookUrl);
-    if (mounted) {
-      setState(() => _cachedCount = count);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(cancelled
-            ? '已停止，缓存 $done/${chapters.length} 章'
-            : '已缓存 $done 章'),
-        duration: const Duration(seconds: 1),
-      ));
-    }
-  }
-
-  /// 清除本书缓存
-  Future<void> _clearCache(Book b) async {
-    final n = await ChapterCache.clearBook(b.bookUrl);
-    if (mounted) {
-      setState(() => _cachedCount = 0);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('已清除 $n 章缓存'),
-        duration: const Duration(seconds: 1),
-      ));
-    }
+    if (mounted) setState(() => _cachedCount = count);
   }
 
   @override
@@ -313,7 +251,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
       backgroundColor: Colors.transparent,
       body: Stack(
         children: [
-          const Positioned.fill(child: GlassBackground()),
+          const Positioned.fill(child: AppBackground()),
           SafeArea(
             child: FutureBuilder<Book>(
               future: _detailFuture,
@@ -326,7 +264,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                       padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
                       child: Row(
                         children: [
-                          GlassRoundButton(
+                          FlatRoundButton(
                             icon: Icons.arrow_back,
                             tooltip: '返回',
                             onTap: () => Navigator.of(context).pop(),
@@ -348,7 +286,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                       child: ListView(
                         padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
                         children: [
-                          Glass(
+                          FlatCard(
                             radius: 16,
                             padding: const EdgeInsets.all(16),
                             child: Column(
@@ -427,7 +365,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
                           ),
                           const SizedBox(height: 16),
                           // 操作区
-                          Glass(
+                          FlatCard(
                             radius: 16,
                             padding: const EdgeInsets.all(12),
                             child: Column(
@@ -467,12 +405,12 @@ class _BookDetailPageState extends State<BookDetailPage> {
                                           minimumSize:
                                               const Size.fromHeight(44),
                                         ),
-                                        icon: const Icon(Icons.download),
+                                        icon: const Icon(Icons.download_for_offline_outlined),
                                         label: Text(
                                             _cachedCount > 0
-                                                ? '下载全书($_cachedCount章)'
-                                                : '下载全书'),
-                                        onPressed: () => _downloadAll(b),
+                                                ? '缓存管理($_cachedCount章)'
+                                                : '缓存管理'),
+                                        onPressed: () => _openCacheSheet(b),
                                       ),
                                     ),
                                   ],
@@ -495,19 +433,6 @@ class _BookDetailPageState extends State<BookDetailPage> {
                                     Expanded(child: _ShelfButton(book: b)),
                                   ],
                                 ),
-                                if (_cachedCount > 0) ...[
-                                  const SizedBox(height: 10),
-                                  TextButton.icon(
-                                    onPressed: () => _clearCache(b),
-                                    icon: const Icon(Icons.delete_outline,
-                                        size: 18,
-                                        color: Color(0xFFE5484D)),
-                                    label: const Text('清除本书缓存',
-                                        style: TextStyle(
-                                            color: Color(0xFFE5484D),
-                                            fontSize: 13)),
-                                  ),
-                                ],
                               ],
                             ),
                           ),

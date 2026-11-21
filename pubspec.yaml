@@ -38,14 +38,10 @@ dependencies:
   shared_preferences: ^2.3.2  # 书架/设置/历史持久化
   fast_gbk: ^1.0.0
   crypto: ^3.0.0          # MD5/签名（七猫/书旗等 App 接口）
-  archive: ^3.6.1         # ZIP/EPUB/CBZ 解压（本地书导入）
+  archive: ^3.6.1         # EPUB 解压（本地文字小说导入）
   path_provider: ^2.1.4   # 应用文档目录（本地书存储）
   file_picker: ^8.1.2     # 选择本地文件导入
   audioplayers: ^6.1.0    # 阅读背景音（白噪音循环）
-  media_kit: ^1.1.11      # 视频播放（libmpv）
-  media_kit_video: ^1.2.5 # 视频播放 Widget
-  media_kit_libs_video: ^1.0.5 # Windows libmpv 运行时
-  liquid_glass_easy: ^5.2.0
 
 dev_dependencies:
   flutter_test:

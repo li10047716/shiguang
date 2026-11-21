@@ -1,13 +1,11 @@
-/// 本地书籍：TXT / EPUB / 漫画包（CBZ、ZIP、图片版 EPUB）导入、解析与读取。
+/// 本地 TXT / EPUB 小说导入、解析与读取。
 ///
 /// 移植自 shiguang `reader/localbook.py`。只读本地文件，不联网。
 /// 书籍 id 用 `loc:<hash>`，章节地址 `loc:<hash>/<序号>`。
-/// 漫画页地址用 `locimg://<hash>/<ch>/<i>`，阅读器据此读本地图片文件。
 ///
 /// 落盘（应用支持目录 /local_books/）：
 ///   `hash.json`           # 元信息（书名/作者/简介/目录）
 ///   `hash/000000.json`    # 单章正文（按章存）
-///   `hash/img/000001.jpg` # 漫画页（导入时解压编号）
 library;
 
 import 'dart:convert';
@@ -25,21 +23,8 @@ import '../novel_source.dart';
 import '../source.dart';
 
 const String _prefix = 'loc:';
-const String _imgScheme = 'locimg://';
 const String _srcName = '本地导入';
 const int _maxBytes = 40 * 1024 * 1024;
-const int _maxComicBytes = 220 * 1024 * 1024;
-const List<String> _imgExt = [
-  '.jpg', '.png', '.webp', '.gif', '.bmp', '.avif',
-];
-const Map<String, String> _imgMime = {
-  '.jpg': 'image/jpeg',
-  '.png': 'image/png',
-  '.webp': 'image/webp',
-  '.gif': 'image/gif',
-  '.bmp': 'image/bmp',
-  '.avif': 'image/avif',
-};
 
 class LocalBookSource extends SourceBase {
   @override
@@ -321,209 +306,37 @@ class LocalBookSource extends SourceBase {
     return t.length > 800 ? t.substring(0, 800) : t;
   }
 
-  // ---------- 漫画包 ----------
-
-  static List<dynamic> _natural(String name) {
-    return RegExp(r'(\d+)')
-        .allMatches(name)
-        .map((m) => int.tryParse(m.group(1)!) ?? m.group(1)!.toLowerCase())
-        .toList();
-  }
-
-  static String _imgExtOf(String name) {
-    final ext = name.contains('.')
-        ? name.substring(name.lastIndexOf('.')).toLowerCase()
-        : '';
-    if (ext == '.jpeg' || ext == '.jpe') return '.jpg';
-    return _imgExt.contains(ext) ? ext : '';
-  }
-
-  static String _sniffExt(List<int> blob, String name) {
-    if (blob.length >= 3 && blob[0] == 0xFF && blob[1] == 0xD8 && blob[2] == 0xFF) {
-      return '.jpg';
-    }
-    if (blob.length >= 8 &&
-        blob[0] == 0x89 && blob[1] == 0x50 && blob[2] == 0x4E && blob[3] == 0x47) {
-      return '.png';
-    }
-    if (blob.length >= 12 &&
-        blob[0] == 0x52 && blob[1] == 0x49 && blob[2] == 0x46 && blob[3] == 0x46 &&
-        blob[8] == 0x57 && blob[9] == 0x45 && blob[10] == 0x42 && blob[11] == 0x50) {
-      return '.webp';
-    }
-    return _imgExtOf(name);
-  }
-
-  static List<String> _comicEntries(List<String> names) {
-    final out = <String>[];
-    for (final n in names) {
-      if (n.endsWith('/') || n.contains('__MACOSX')) continue;
-      final base = n.split('/').last;
-      if (base.isEmpty || base.startsWith('.')) continue;
-      if (_imgExtOf(base).isNotEmpty) out.add(n);
-    }
-    return out;
-  }
-
-  static List<(String, List<String>)> _groupByDir(List<String> names, String fallback) {
-    final byDir = <String, List<String>>{};
-    for (final n in names) {
-      final d = n.contains('/') ? n.substring(0, n.lastIndexOf('/')) : '';
-      byDir.putIfAbsent(d, () => []).add(n);
-    }
-    if (byDir.length >= 2) {
-      final dirs = byDir.keys.toList()..sort((a, b) => _cmpNatural(a, b));
-      final groups = <(String, List<String>)>[];
-      for (final d in dirs) {
-        final label = d.isEmpty
-            ? '第${groups.length + 1}话'
-            : d.split('/').last;
-        groups.add((label, byDir[d]!..sort((a, b) => _cmpNatural(a, b))));
-      }
-      return groups;
-    }
-    return [(fallback, names..sort((a, b) => _cmpNatural(a, b)))];
-  }
-
-  static int _cmpNatural(String a, String b) {
-    final na = _natural(a);
-    final nb = _natural(b);
-    final len = na.length < nb.length ? na.length : nb.length;
-    for (var i = 0; i < len; i++) {
-      if (na[i] is int && nb[i] is int) {
-        final c = (na[i] as int).compareTo(nb[i] as int);
-        if (c != 0) return c;
-      } else {
-        final c = na[i].toString().compareTo(nb[i].toString());
-        if (c != 0) return c;
-      }
-    }
-    return na.length.compareTo(nb.length);
-  }
-
-  static Future<List<(String, List<(String, List<int>)>)>> _parseZipComic(
-      List<int> raw, String fallback) async {
-    final archive = ZipDecoder().decodeBytes(raw);
-    final names = archive.files.map((f) => f.name).toList();
-    final entries = _comicEntries(names);
-    if (entries.isEmpty) {
-      throw FormatException('压缩包里没有图片（支持 jpg / png / webp / gif）');
-    }
-    final groups = <(String, List<(String, List<int>)>)>[];
-    for (final (label, items) in _groupByDir(entries, fallback)) {
-      final pages = <(String, List<int>)>[];
-      for (final n in items) {
-        final f = archive.files.where((x) => x.name == n).firstOrNull;
-        if (f == null) continue;
-        final blob = f.content;
-        if (blob.isNotEmpty) pages.add((n.split('/').last, blob));
-      }
-      if (pages.isNotEmpty) groups.add((label, pages));
-    }
-    return groups;
-  }
-
-  static Future<List<(String, List<(String, List<int>)>)>> _parseEpubComic(
-      List<int> raw, String fallback) async {
-    final archive = ZipDecoder().decodeBytes(raw);
-    final names = archive.files.map((f) => f.name).toSet();
-    String opfPath = '';
-    final cont = archive.files
-        .where((f) => f.name == 'META-INF/container.xml')
-        .toList();
-    if (cont.isNotEmpty) {
-      final c = utf8.decode(cont.first.content, allowMalformed: true);
-      final m = RegExp(r'full-path="([^"]+)"').firstMatch(c);
-      if (m != null) opfPath = m.group(1)!;
-    }
-    if (opfPath.isEmpty) {
-      final cand = names.where((n) => n.toLowerCase().endsWith('.opf')).toList();
-      opfPath = cand.isNotEmpty ? cand.first : '';
-    }
-    if (opfPath.isEmpty || !names.contains(opfPath)) {
-      throw FormatException('这个 EPUB 缺少 OPF 目录文件，无法解析');
-    }
-    final base = opfPath.contains('/')
-        ? opfPath.substring(0, opfPath.lastIndexOf('/') + 1)
-        : '';
-    final opfFile = archive.files.where((f) => f.name == opfPath).firstOrNull;
-    final opf = utf8.decode(opfFile!.content, allowMalformed: true);
-    final items = <String, String>{};
-    for (final m in _re(r'<item\b[^>]*>').allMatches(opf)) {
-      final tag = m.group(0)!;
-      final mid = RegExp(r'\bid="([^"]+)"').firstMatch(tag)?.group(1);
-      final href = RegExp(r'\bhref="([^"]+)"').firstMatch(tag)?.group(1);
-      if (mid != null && href != null) items[mid] = _unescape(href);
-    }
-    final spine = _re(r'<itemref\b[^>]*\bidref="([^"]+)"')
-        .allMatches(opf)
-        .map((m) => m.group(1)!)
-        .toList();
-    var hrefs = <String>[];
-    for (final s in spine) {
-      if (items.containsKey(s)) hrefs.add(items[s]!);
-    }
-    if (hrefs.isEmpty) hrefs = items.values.toList();
-
-    final groups = <(String, List<(String, List<int>)>)>[];
-    for (final href in hrefs) {
-      var path = href.split('#').first;
-      if (base.isNotEmpty) path = '$base$path';
-      final norm = _normPath(path);
-      if (!names.contains(norm)) continue;
-      final f = archive.files.where((x) => x.name == norm).firstOrNull;
-      if (f == null) continue;
-      final page = utf8.decode(f.content, allowMalformed: true);
-      final pages = <(String, List<int>)>[];
-      for (final m in _re(r'<img[^>]+src="([^"]+)"').allMatches(page)) {
-        final src = _unescape(m.group(1)!).split('#').first;
-        final dir = norm.contains('/')
-            ? norm.substring(0, norm.lastIndexOf('/') + 1)
-            : '';
-        final imgPath = _normPath('$dir$src');
-        if (!names.contains(imgPath)) continue;
-        final img = archive.files.where((x) => x.name == imgPath).firstOrNull;
-        if (img != null) pages.add((imgPath.split('/').last, img.content));
-      }
-      if (pages.isNotEmpty) {
-        groups.add((_epubTitle(page, '第${groups.length + 1}话'), pages));
-      }
-    }
-    return groups;
-  }
-
   // ---------- 导入 ----------
 
   static Future<Book> importBytes(String name, List<int> raw) async {
     if (raw.isEmpty) throw FormatException('文件是空的');
     final lower = name.toLowerCase();
-    var fallback = name.replaceAll(
-        RegExp(r'\.(txt|epub|cbz|zip|text)$', caseSensitive: false), '');
+    final isEpub = lower.endsWith('.epub');
+    final isTxt = lower.endsWith('.txt');
+    if (!isEpub && !isTxt) {
+      throw FormatException('仅支持导入 TXT 或文字版 EPUB');
+    }
+    var fallback = name.replaceAll(RegExp(r'\.(txt|epub)$', caseSensitive: false), '');
     fallback = fallback.trim();
     if (fallback.isEmpty) fallback = '未命名';
-    final isComicPack = lower.endsWith('.cbz') || lower.endsWith('.zip');
-    final limit = isComicPack || lower.endsWith('.epub') ? _maxComicBytes : _maxBytes;
-    if (raw.length > limit) {
-      throw FormatException('文件超过 ${limit ~/ (1024 * 1024)}MB，请先拆分再导入');
+    if (raw.length > _maxBytes) {
+      throw FormatException('文件超过 ${_maxBytes ~/ (1024 * 1024)}MB，请先拆分再导入');
     }
 
-    if (isComicPack) {
-      if (raw.length < 2 || raw[0] != 0x50 || raw[1] != 0x4B) {
-        throw FormatException('这不是有效的 CBZ / ZIP 文件');
-      }
-      return _importComic(name, raw, fallback);
-    }
-
-    if (lower.endsWith('.epub') ||
-        (raw.length >= 2 && raw[0] == 0x50 && raw[1] == 0x4B)) {
+    if (isEpub) {
       if (raw.length < 2 || raw[0] != 0x50 || raw[1] != 0x4B) {
         throw FormatException('这不是有效的 EPUB 文件');
       }
       final (title, author, intro, chapters) = await parseEpub(raw, fallback);
-      if (chapters.isEmpty) return _importComic(name, raw, fallback);
+      if (chapters.isEmpty) {
+        throw FormatException('EPUB 中没有可读取的文字章节，不支持仅图片 EPUB');
+      }
       return _saveNovel(raw, title, author, intro, chapters);
     }
 
+    if (raw.length >= 2 && raw[0] == 0x50 && raw[1] == 0x4B) {
+      throw FormatException('ZIP 压缩包不受支持，请选择 TXT 或 EPUB 文件');
+    }
     final (title, author, _, chapters) = await _parseTxt(raw, fallback);
     if (chapters.isEmpty) throw FormatException('没有解析到任何正文，换个文件试试');
     final parasList = chapters
@@ -596,65 +409,6 @@ class LocalBookSource extends SourceBase {
     return _metaToBook(meta);
   }
 
-  static Future<Book> _importComic(String name, List<int> raw, String fallback) async {
-    final lower = name.toLowerCase();
-    final groups = lower.endsWith('.epub')
-        ? await _parseEpubComic(raw, fallback)
-        : await _parseZipComic(raw, fallback);
-    if (groups.isEmpty) throw FormatException('这本漫画没有解析出任何可看的页');
-
-    final h = _hash(fallback, raw);
-    final bid = '$_prefix$h';
-    final dir = await _chapDir(h);
-    final imgDir = '$dir${Platform.pathSeparator}img';
-    Directory(imgDir).createSync(recursive: true);
-
-    final catalog = <Map<String, dynamic>>[];
-    var seq = 0;
-    for (final (label, pages) in groups) {
-      final keep = <String>[];
-      for (final (srcName, blob) in pages) {
-        final ext = _sniffExt(blob, srcName);
-        if (ext.isEmpty || blob.isEmpty) continue;
-        seq++;
-        final fn = '${seq.toString().padLeft(6, '0')}$ext';
-        File('$imgDir${Platform.pathSeparator}$fn')
-            .writeAsBytesSync(blob);
-        keep.add(fn);
-      }
-      if (keep.isEmpty) continue;
-      final idx = catalog.length;
-      final url = '$_prefix$h/$idx';
-      final chapFile = File('$dir${Platform.pathSeparator}${_padded(idx)}.json');
-      chapFile.writeAsStringSync(jsonEncode({
-        'title': label,
-        'kind': 'comic',
-        'pages': keep,
-        'url': url,
-      }));
-      catalog.add({'t': label, 'u': url, 'i': idx});
-    }
-    if (catalog.isEmpty) throw FormatException('这本漫画没有可显示的图片');
-
-    final meta = {
-      'id': bid,
-      'title': fallback,
-      'author': '佚名',
-      'intro': '本地导入的漫画，无需联网，打开即可阅读。',
-      'source': _srcName,
-      'category': '本地漫画',
-      'status': '${catalog.length} 话',
-      'cover': '',
-      'created': DateTime.now().millisecondsSinceEpoch / 1000,
-      'count': catalog.length,
-      'kind': 'comic',
-      'unit': '话',
-      'chapters': catalog,
-    };
-    File(await _metaPath(h)).writeAsStringSync(jsonEncode(meta));
-    return _metaToBook(meta);
-  }
-
   static String _padded(int i) => i.toString().padLeft(6, '0');
 
   static Book _metaToBook(Map<String, dynamic> meta) {
@@ -671,7 +425,7 @@ class LocalBookSource extends SourceBase {
       bookUrl: meta['id']?.toString() ?? '',
       sourceId: 'loc',
       sourceName: _srcName,
-      type: meta['kind'] == 'comic' ? ContentType.comic : ContentType.novel,
+      type: ContentType.novel,
       lastChapter: chapters.isNotEmpty ? chapters.last.title : '',
       intro: meta['intro']?.toString() ?? '',
     );
@@ -728,54 +482,13 @@ class LocalBookSource extends SourceBase {
       throw SourceException('这一章的正文丢了，重新导入一次试试');
     }
     final data = jsonDecode(chapFile.readAsStringSync()) as Map<String, dynamic>;
-    if (data['kind'] == 'comic') {
-      final imgFiles = pagesOf(data);
-      final pages = <String>[
-        for (var i = 0; i < imgFiles.length; i++) '$_imgScheme$h/$idx/$i',
-      ];
-      return Content(
-        title: data['title']?.toString() ?? chapter.title,
-        pages: pages,
-        kind: ContentType.comic,
-      );
-    }
     return Content(
       title: data['title']?.toString() ?? chapter.title,
       paras: (data['paras'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
-      kind: ContentType.novel,
     );
   }
 
-  static List<dynamic> pagesOf(Map<String, dynamic> data) =>
-      data['pages'] as List<dynamic>? ?? [];
-
-  /// 读一页本地漫画图，返回 (bytes, content_type)。
-  static Future<(List<int>, String)> readPage(String pageUrl) async {
-    final m = RegExp(r'^locimg://([0-9a-f]{8,16})/(\d+)/(\d+)$')
-        .firstMatch(pageUrl);
-    if (m == null) throw FormatException('页地址不合法');
-    final h = m.group(1)!;
-    final ch = int.parse(m.group(2)!);
-    final i = int.parse(m.group(3)!);
-    final dir = await _chapDir(h);
-    final chapFile = File('$dir${Platform.pathSeparator}${_padded(ch)}.json');
-    if (!chapFile.existsSync()) throw FormatException('没有这一话');
-    final data = jsonDecode(chapFile.readAsStringSync()) as Map<String, dynamic>;
-    final pages = pagesOf(data);
-    if (i < 0 || i >= pages.length) throw FormatException('没有这一页');
-    final fn = pages[i].toString();
-    if (fn.contains('/') || fn.contains('\\') || fn.contains('..')) {
-      throw FormatException('页地址不合法');
-    }
-    final p = File('$dir${Platform.pathSeparator}img${Platform.pathSeparator}$fn');
-    if (!p.existsSync()) throw FormatException('这一页的图片不见了');
-    final ext = fn.contains('.')
-        ? fn.substring(fn.lastIndexOf('.')).toLowerCase()
-        : '.jpg';
-    return (p.readAsBytesSync(), _imgMime[ext] ?? 'image/jpeg');
-  }
-
-  /// 列出全部本地书（元信息，按导入时间倒序）
+  /// 列出本地文字小说，不修改或删除其他类型的元信息。
   static Future<List<Book>> list() async {
     final dir = await root();
     final out = <Book>[];
@@ -783,6 +496,7 @@ class LocalBookSource extends SourceBase {
       if (!f.path.endsWith('.json')) continue;
       try {
         final meta = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+        if (meta['kind'] != 'novel') continue;
         out.add(_metaToBook(meta));
       } catch (_) {}
     }

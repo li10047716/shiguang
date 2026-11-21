@@ -763,10 +763,6 @@ class ShuqiSource implements NovelSource {
         .toList();
     if (paras.isEmpty) throw SourceException('书旗正文为空');
 
-    return Content(
-      title: chapter.title,
-      paras: paras,
-      kind: ContentType.novel,
-    );
+    return Content(title: chapter.title, paras: paras);
   }
 }

@@ -72,18 +72,26 @@ class _SearchPageState extends State<SearchPage> {
     if (mounted) setState(() => _history = list);
   }
 
-  /// 圆形图标按钮（返回 / 三点）
-  Widget _roundBtn(IconData icon, String tip, VoidCallback onTap) {
+  /// 平面圆角图标按钮（返回 / 三点）：与书架工具栏白色卡片同款
+  Widget _flatBtn(IconData icon, String tip, VoidCallback onTap) {
     final cs = Theme.of(context).colorScheme;
-    return Material(
-      color: cs.surface,
-      shape: CircleBorder(side: BorderSide(color: cs.outlineVariant)),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Icon(icon, size: 20, color: cs.onSurface),
+    return Tooltip(
+      message: tip,
+      child: FlatCard(
+        radius: 14,
+        shadow: false,
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: SizedBox(
+              width: 46,
+              height: 46,
+              child: Icon(icon, size: 20, color: cs.onSurface),
+            ),
+          ),
         ),
       ),
     );
@@ -112,7 +120,7 @@ class _SearchPageState extends State<SearchPage> {
           constraints: BoxConstraints(
             maxHeight: MediaQuery.of(context).size.height * 0.78,
           ),
-          child: Glass(
+          child: FlatCard(
             radius: 24,
             blur: 3,
             padding: const EdgeInsets.all(20),
@@ -199,7 +207,7 @@ class _SearchPageState extends State<SearchPage> {
       children: [
         // 全屏背景放最底层：键盘弹出时 body 缩高，背景仍铺满整窗，
         // 避免键盘四周露出黑色块
-        const Positioned.fill(child: GlassBackground()),
+        const Positioned.fill(child: AppBackground()),
         Scaffold(
           backgroundColor: Colors.transparent,
           body: SafeArea(
@@ -210,59 +218,55 @@ class _SearchPageState extends State<SearchPage> {
                   // 返回 + 搜索框 + 三点(书源选择)
                   Row(
                     children: [
-                      _roundBtn(
+                      _flatBtn(
                           Icons.arrow_back, '返回',
                           () => Navigator.of(context).pop()),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Container(
-                          height: 46,
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.surface,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: Theme.of(context)
-                                  .colorScheme.outlineVariant,
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              const SizedBox(width: 14),
-                              const Icon(Icons.search,
-                                  size: 20, color: Colors.grey),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: TextField(
-                                  controller: _controller,
-                                  focusNode: _focus,
-                                  textInputAction: TextInputAction.search,
-                                  onSubmitted: (_) => _go(),
-                                  decoration: const InputDecoration(
-                                    hintText: '搜索书名、作者',
-                                    hintStyle:
-                                        TextStyle(color: Colors.grey),
-                                    border: InputBorder.none,
-                                    isDense: true,
+                        child: FlatCard(
+                          radius: 14,
+                          shadow: false,
+                          child: SizedBox(
+                            height: 46,
+                            child: Row(
+                              children: [
+                                const SizedBox(width: 14),
+                                const Icon(Icons.search,
+                                    size: 20, color: Colors.grey),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: TextField(
+                                    controller: _controller,
+                                    focusNode: _focus,
+                                    textInputAction: TextInputAction.search,
+                                    onSubmitted: (_) => _go(),
+                                    decoration: const InputDecoration(
+                                      hintText: '搜索书名、作者',
+                                      hintStyle:
+                                          TextStyle(color: Colors.grey),
+                                      border: InputBorder.none,
+                                      isDense: true,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              if (_controller.text.isNotEmpty)
-                                IconButton(
-                                  tooltip: '清空',
-                                  icon: const Icon(Icons.clear,
-                                      size: 18, color: Colors.grey),
-                                  onPressed: () {
-                                    _controller.clear();
-                                    setState(() {});
-                                  },
-                                ),
-                              const SizedBox(width: 6),
-                            ],
+                                if (_controller.text.isNotEmpty)
+                                  IconButton(
+                                    tooltip: '清空',
+                                    icon: const Icon(Icons.clear,
+                                        size: 18, color: Colors.grey),
+                                    onPressed: () {
+                                      _controller.clear();
+                                      setState(() {});
+                                    },
+                                  ),
+                                const SizedBox(width: 6),
+                              ],
+                            ),
                           ),
                         ),
                       ),
                       const SizedBox(width: 8),
-                      _roundBtn(Icons.more_vert, '选择搜索书源',
+                      _flatBtn(Icons.more_vert, '选择搜索书源',
                           _showSourcePicker),
                     ],
                   ),

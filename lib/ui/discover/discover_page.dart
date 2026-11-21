@@ -1,8 +1,7 @@
 /// 发现页。
 ///
-/// 布局对应 shiguang 发现页：顶部「搜索 | 书源选择 ▾ | 刷新」工具栏，
-/// 下方「榜单/分类」分节 tab + 横向芯片行，再下方三列横向书卡
-/// （封面在左，信息在右：书名 / 来源 / 分类 / 简介）。
+/// 布局：顶部居中的「书源选择 ▾」悬浮工具栏，
+/// 下方左侧「推荐/分类」常驻栏 + 右侧二级标签与书库：桌面多列网格，手机单列横卡。
 library;
 
 import 'package:flutter/gestures.dart';
@@ -15,7 +14,6 @@ import '../../sources/source.dart';
 import '../../sources/source_registry.dart';
 import '../book/book_detail_page.dart';
 import '../glass.dart';
-import '../search/search_page.dart';
 import '../widgets/cover_image.dart';
 import '../widgets/type_tag.dart';
 
@@ -32,7 +30,7 @@ class _DiscoverPageState extends State<DiscoverPage>
 
   List<NovelSource> _sources = [];
   NovelSource? _source;
-  bool _sectionRank = true; // true=榜单节，false=分类节
+  bool _sectionRank = true; // true=推荐节，false=分类节
   DiscoverTab? _tab;
 
   final List<Book> _books = [];
@@ -44,19 +42,21 @@ class _DiscoverPageState extends State<DiscoverPage>
 
   // 无限滚动
   final ScrollController _scrollCtrl = ScrollController();
+  // 列表末尾「加载更多」提示的锚点：若它已出现在视口内说明首屏没铺满
+  final GlobalKey _loadMoreKey = GlobalKey();
 
   // 发现结果缓存：key = '$sourceId|$tabKey|$isRank' → (已加载书目, 总页数, 已加载页)
   final Map<String, (List<Book>, int, int)> _cache = {};
   bool _forceRefresh = false;
 
-  // 书源选择玻璃下拉
+  // 书源选择下拉
   final GlobalKey _sourceKey = GlobalKey();
   OverlayEntry? _menuOverlay;
 
   @override
   bool get wantKeepAlive => true;
 
-  // 当前源可用的分节（榜单/分类）
+  // 当前源可用的分节（推荐/分类）
   List<DiscoverTab> get _ranks =>
       _source?.discoverTabs.where((t) => t.isRank).toList() ?? const [];
   List<DiscoverTab> get _cats =>
@@ -126,7 +126,7 @@ class _DiscoverPageState extends State<DiscoverPage>
   }
 
   void _initSection() {
-    // 优先榜单节，其次分类节
+    // 优先推荐节，其次分类节
     if (_ranks.isNotEmpty) {
       _sectionRank = true;
       _tab = _ranks.first;
@@ -136,14 +136,16 @@ class _DiscoverPageState extends State<DiscoverPage>
     }
   }
 
-  Future<void> _load({bool reset = false}) async {
+  Future<void> _load({bool reset = false, bool keepBooks = false}) async {
     final src = _source;
     final tab = _tab;
     if (src == null || tab == null) return;
     final key = _cacheKey;
     if (reset) {
       _page = 1;
-      _books.clear();
+      // 下拉刷新时保留旧书列表：否则列表清空后中间会再转一个大圈，
+      // 与顶部 RefreshIndicator 的刷新圈重复。成功后用新数据替换即可。
+      if (!keepBooks) _books.clear();
       _error = null;
       // 内存缓存命中：秒开（切回书源/标签时不再转圈）
       if (!_forceRefresh && key.isNotEmpty && _cache.containsKey(key)) {
@@ -155,6 +157,7 @@ class _DiscoverPageState extends State<DiscoverPage>
           _page = cachedLoaded;
           _more = _page < _pages;
         });
+        _scheduleAutoFill();
         return;
       }
       // 磁盘缓存命中：秒开（重进 app 后 30 分钟内）
@@ -185,6 +188,8 @@ class _DiscoverPageState extends State<DiscoverPage>
       );
       if (!mounted || _source != src || _tab != tab) return;
       setState(() {
+        // 下拉刷新：用新数据替换旧列表；普通翻页：追加
+        if (keepBooks) _books.clear();
         _books.addAll(r.books);
         _pages = r.pages;
         _error = null;
@@ -215,8 +220,30 @@ class _DiscoverPageState extends State<DiscoverPage>
           _loading = false;
           _more = _page < _pages;
         });
+        // 首屏内容不足一屏时自动续加载，直到填满视口或没有更多
+        _scheduleAutoFill();
       }
     }
+  }
+
+  /// 首屏可能一页填不满视口，导致用户必须先上拉/点击才加载更多。
+  /// 布局完成后检测列表末尾「加载更多」提示是否已进入视口：
+  /// 若已进入（说明底下还有空位），自动加载下一页，循环直到铺满或无更多。
+  void _scheduleAutoFill() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _loading || !_more) return;
+      final ctx = _loadMoreKey.currentContext;
+      if (ctx == null) return;
+      final box = ctx.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) return;
+      final top = box.localToGlobal(Offset.zero).dy;
+      final screenH = MediaQuery.of(context).size.height;
+      // 提示行顶部已进入屏幕（顶部 < 屏高）→ 底下还有空位，继续加载
+      if (top < screenH) {
+        _page++;
+        _load();
+      }
+    });
   }
 
   // 刷新：清当前源/标签缓存（内存+磁盘），强制重载
@@ -227,7 +254,8 @@ class _DiscoverPageState extends State<DiscoverPage>
       DiscoverCache.clear(key);
     }
     _forceRefresh = true;
-    return _load(reset: true).whenComplete(() => _forceRefresh = false);
+    return _load(reset: true, keepBooks: true)
+        .whenComplete(() => _forceRefresh = false);
   }
 
   void _pickSource(NovelSource s) {
@@ -273,7 +301,7 @@ class _DiscoverPageState extends State<DiscoverPage>
                 children: [
                   // 内容（分类行 + 芯片 + 书籍）铺满，顶部预留悬浮胶囊高度
                   Positioned.fill(child: _body()),
-                  // 顶部悬浮条：搜索(左) / 书源选择(中) / 刷新(右)，各自独立
+                  // 顶部悬浮条：只保留居中的书源选择
                   Positioned(top: 12, left: 16, right: 16, child: _topBar()),
                 ],
               ),
@@ -281,31 +309,20 @@ class _DiscoverPageState extends State<DiscoverPage>
     );
   }
 
-  // ---------- 顶部悬浮条：搜索(左) / 书源选择(中) / 刷新(右) ----------
+  // ---------- 顶部悬浮条：只保留居中的书源选择 ----------
 
   Widget _topBar() {
     final s = _source!;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        // 左上：搜索（关闭投影，玻璃底直接贴背景，不出现额外暗层）
-        GlassRoundButton(
-          icon: Icons.search,
-          tooltip: '搜索',
-          shadow: false,
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const SearchPage()),
-          ),
-        ),
-        // 中间：书源选择（独立玻璃胶囊，点击弹玻璃下拉；关闭投影）
-        Glass(
-          radius: 50,
-          blur: 3,
-          shadow: false,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: GestureDetector(
-            key: _sourceKey,
-            onTap: _toggleSourceMenu,
+    return Center(
+      // 书源选择（白色卡片框，与书卡同底色，点击弹下拉）
+      child: FlatCard(
+        radius: 14,
+        shadow: false,
+        child: GestureDetector(
+          key: _sourceKey,
+          onTap: _toggleSourceMenu,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -323,18 +340,11 @@ class _DiscoverPageState extends State<DiscoverPage>
             ),
           ),
         ),
-        // 右上：刷新（关闭投影）
-        GlassRoundButton(
-          icon: Icons.refresh,
-          tooltip: '刷新',
-          shadow: false,
-          onTap: _refresh,
-        ),
-      ],
+      ),
     );
   }
 
-  // ---------- 书源选择：玻璃下拉 ----------
+  // ---------- 书源选择：下拉菜单 ----------
 
   void _toggleSourceMenu() {
     if (_menuOverlay != null) {
@@ -393,7 +403,7 @@ class _DiscoverPageState extends State<DiscoverPage>
           left: left,
           top: top.clamp(0.0, screen.height - menuH - 8),
           width: menuW,
-          child: Glass(
+          child: FlatCard(
             radius: 14,
             blur: 3,
             padding: const EdgeInsets.symmetric(vertical: 6),
@@ -446,7 +456,7 @@ class _DiscoverPageState extends State<DiscoverPage>
                 ),
               ),
               const SizedBox(width: 6),
-              TypeTag(type: x.type),
+              const TypeTag(),
             ],
           ),
         ),
@@ -454,67 +464,92 @@ class _DiscoverPageState extends State<DiscoverPage>
     );
   }
 
-  // ---------- 分节 tab：榜单 / 分类 ----------
+  // ---------- 左侧常驻栏：只保留「推荐 / 分类」两个顶级入口 ----------
 
-  // ---------- 分类区：圆角矩形框（榜单/分类 + 分类芯片，芯片放不下自动换行） ----------
-
-  Widget _categoryBox() {
-    // 无榜单且无分类时不渲染空玻璃框
+  Widget _categoryRail(bool isMobile) {
     if (_ranks.isEmpty && _cats.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      // 顶部让出顶栏高度（顶栏 top:12 + 约 48 高），分类框整体下移避开悬浮按钮
-      padding: const EdgeInsets.fromLTRB(16, 60, 16, 0),
-      child: Glass(
-        radius: 20,
-        blur: 3,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _sectionTabs(),
-            _chips(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _sectionTabs() {
-    final hasRank = _ranks.isNotEmpty;
-    final hasCat = _cats.isNotEmpty;
-    if (!hasRank && !hasCat) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
+    return FlatCard(
+      radius: 16,
+      blur: 3,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+      // 按内容收缩高度：白色底框只包住“推荐/分类”按钮，不再铺到应用底部
+      child: ListView(
+        padding: EdgeInsets.zero,
+        shrinkWrap: true,
+        primary: false,
         children: [
-          if (hasRank) _sectionTab('榜单', true),
-          const SizedBox(width: 10),
-          if (hasCat) _sectionTab('分类', false),
+          if (_ranks.isNotEmpty) _railSection('推荐', true, isMobile),
+          if (_cats.isNotEmpty) _railSection('分类', false, isMobile),
         ],
       ),
     );
   }
 
-  Widget _sectionTab(String label, bool rank) {
+  Widget _railSection(String label, bool rank, bool isMobile) {
     final active = rank == _sectionRank;
     final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: GestureDetector(
+        onTap: () => _pickSection(rank),
+        child: Container(
+          padding: EdgeInsets.symmetric(vertical: isMobile ? 7 : 8),
+          decoration: BoxDecoration(
+            color: active ? cs.primary : cs.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: active ? cs.primary : cs.outlineVariant,
+            ),
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: isMobile ? 12 : 13,
+              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              color: active ? cs.onPrimary : cs.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------- 右侧二级标签：在书籍卡片上方显示 ----------
+
+  Widget _tabChips(bool isMobile) {
+    final tabs = _sectionRank ? _ranks : _cats;
+    if (tabs.isEmpty) return const SizedBox.shrink();
+    final chips = [for (final t in tabs) _tabChip(t, isMobile)];
+    if (isMobile) {
+      return SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(children: chips),
+      );
+    }
+    return Wrap(spacing: 8, runSpacing: 8, children: chips);
+  }
+
+  Widget _tabChip(DiscoverTab t, bool isMobile) {
+    final active = t == _tab;
+    final cs = Theme.of(context).colorScheme;
     return GestureDetector(
-      onTap: () => _pickSection(rank),
+      onTap: () => _pickTab(t),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 7),
+        padding:
+            EdgeInsets.symmetric(horizontal: isMobile ? 12 : 14, vertical: 7),
         decoration: BoxDecoration(
           color: active ? cs.primary : cs.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(
             color: active ? cs.primary : cs.outlineVariant,
           ),
         ),
         child: Text(
-          label,
+          t.name,
           style: TextStyle(
-            fontSize: 14,
-            fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+            fontSize: isMobile ? 12 : 13,
+            fontWeight: active ? FontWeight.w700 : FontWeight.w400,
             color: active ? cs.onPrimary : cs.onSurfaceVariant,
           ),
         ),
@@ -522,93 +557,90 @@ class _DiscoverPageState extends State<DiscoverPage>
     );
   }
 
-  // ---------- 芯片行 ----------
+  // ---------- 内容：左侧常驻栏 + 右侧书库（桌面多列 / 手机单列） ----------
 
-  Widget _chips() {
-    final tabs = _sectionRank ? _ranks : _cats;
-    if (tabs.isEmpty) return const SizedBox.shrink();
-    final cs = Theme.of(context).colorScheme;
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        for (final t in tabs)
-          GestureDetector(
-            onTap: () => _pickTab(t),
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 7),
-              decoration: BoxDecoration(
-                color: t == _tab ? cs.primary : cs.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: t == _tab ? cs.primary : cs.outlineVariant,
-                ),
-              ),
-              child: Text(
-                t.name,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight:
-                      t == _tab ? FontWeight.w600 : FontWeight.w400,
-                  color:
-                      t == _tab ? cs.onPrimary : cs.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ),
-      ],
+  Widget _body() {
+    final width = MediaQuery.of(context).size.width;
+    final isMobile = width < 600;
+    final railWidth = isMobile ? 60.0 : 110.0;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 60, 16, 0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: railWidth, child: _categoryRail(isMobile)),
+          SizedBox(width: isMobile ? 10 : 14),
+          Expanded(child: _bookArea(width, isMobile)),
+        ],
+      ),
     );
   }
 
-  // ---------- 内容 ----------
-
-  Widget _body() {
-    final isMobile = MediaQuery.of(context).size.width < 600;
-    // 分类框常驻；切换标签/源时只有下方书籍区随加载状态刷新，
-    // 上面的「榜单/分类」和芯片保持不动。
-    // 内容铺到顶（不再留 60 空带，避免顶部露裸渐变「遮罩带」）。
-    return Padding(
-      padding: EdgeInsets.zero,
-      child: RefreshIndicator(
-        onRefresh: _refresh,
-        child: ScrollConfiguration(
-          // 桌面端默认鼠标拖拽不滚动列表，这里允许鼠标/触屏拖拽，
-          // 才能产生过滚触发 RefreshIndicator 下拉刷新。
-          behavior: ScrollConfiguration.of(context).copyWith(
-            dragDevices: {
-              PointerDeviceKind.touch,
-              PointerDeviceKind.mouse,
-              PointerDeviceKind.stylus,
-              PointerDeviceKind.trackpad,
-            },
-          ),
-          child: CustomScrollView(
-            controller: _scrollCtrl,
-            physics: const AlwaysScrollableScrollPhysics(),
-            slivers: [
-              SliverToBoxAdapter(child: _categoryBox()),
-              // 书籍区：错误 / 加载 / 空 / 网格（仅此区随标签切换刷新）
-              if (_error != null && _books.isEmpty)
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _errorView(),
-                )
-              else if (_books.isEmpty)
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _loading
-                      ? const Center(child: CircularProgressIndicator())
-                      : const Center(child: Text('暂无内容')),
-                )
-              else ...[
+  Widget _bookArea(double width, bool isMobile) {
+    final columns = width >= 1100 ? 4 : 3;
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      child: ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(
+          dragDevices: {
+            PointerDeviceKind.touch,
+            PointerDeviceKind.mouse,
+            PointerDeviceKind.stylus,
+            PointerDeviceKind.trackpad,
+          },
+        ),
+        child: CustomScrollView(
+          controller: _scrollCtrl,
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _listHeader(),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _tabChips(isMobile),
+                  ),
+                ],
+              ),
+            ),
+            if (_error != null && _books.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: _errorView(),
+              )
+            else if (_books.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : const Center(child: Text('暂无内容')),
+              )
+            else ...[
+              if (isMobile)
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                  padding: const EdgeInsets.only(bottom: 10),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, i) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: SizedBox(
+                          height: 112,
+                          child: _DiscoverCard(book: _books[i]),
+                        ),
+                      ),
+                      childCount: _books.length,
+                    ),
+                  ),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.only(bottom: 16),
                   sliver: SliverGrid(
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      // 手机屏窄：横向卡（封面左+信息右）3 列会挤到只剩一条缝，降为 1 列全宽
-                      crossAxisCount: isMobile ? 1 : 3,
-                      childAspectRatio: isMobile ? 2.6 : 2.55,
+                      crossAxisCount: columns,
+                      childAspectRatio: 2.55,
                       crossAxisSpacing: 14,
                       mainAxisSpacing: 14,
                     ),
@@ -618,37 +650,54 @@ class _DiscoverPageState extends State<DiscoverPage>
                     ),
                   ),
                 ),
-                if (_more)
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _loading
-                          ? const SizedBox(
-                              width: 22, height: 22,
-                              child:
-                                  CircularProgressIndicator(strokeWidth: 2))
-                          : GestureDetector(
-                              onTap: () {
-                                _page++;
-                                _load();
-                              },
-                              child: Text(
-                                '上拉或点击加载更多（$_page/$_pages 页）',
-                                style: TextStyle(
-                                    fontSize: 12, color: Colors.grey),
-                              ),
+              if (_more)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    key: _loadMoreKey,
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _loading
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child:
+                                CircularProgressIndicator(strokeWidth: 2))
+                        : GestureDetector(
+                            onTap: () {
+                              _page++;
+                              _load();
+                            },
+                            child: Text(
+                              '滚动自动加载更多（$_page/$_pages 页）',
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey),
                             ),
-                    ),
+                          ),
                   ),
-              ],
+                ),
             ],
-          ),
+          ],
         ),
       ),
     );
   }
 
-  // 书籍区错误视图（分类框仍在，仅书籍区显示重试）
+  Widget _listHeader() {
+    final cs = Theme.of(context).colorScheme;
+    if (_pages <= 1) return const SizedBox.shrink();
+    // 只保留页码，不再显示“推荐 / 分类”字样
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: Text(
+          '$_page/$_pages 页',
+          style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+        ),
+      ),
+    );
+  }
+
+  // 书籍区错误视图（左侧分类栏仍在，仅书籍区显示重试）
   Widget _errorView() {
     return Center(
       child: Column(
@@ -678,7 +727,7 @@ class _DiscoverCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Glass(
+    return FlatCard(
       radius: 10,
       child: Material(
         color: Colors.transparent,

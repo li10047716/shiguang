@@ -33,8 +33,8 @@ class HttpClient {
       'Sec-Fetch-Mode': 'navigate',
       'Sec-Fetch-Site': 'same-origin',
       'Upgrade-Insecure-Requests': '1',
-      // 部分图片 CDN（如大人漫画 18rouman.vip）对 gzip 请求会慢速/挂起，
-      // 强制 identity：curl 1.1s 完整返回 vs gzip 下 30s+ 截断。
+      // 部分图片 CDN 对 gzip 请求会慢速/挂起，
+      // 强制 identity 避免响应被截断。
       'Accept-Encoding': 'identity',
     },
   ));

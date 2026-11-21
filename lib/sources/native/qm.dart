@@ -253,11 +253,7 @@ class QmSource extends SourceBase {
         .toList();
     if (paras.isEmpty) throw SourceException('七猫正文为空');
 
-    return Content(
-      title: chapter.title,
-      paras: paras,
-      kind: ContentType.novel,
-    );
+    return Content(title: chapter.title, paras: paras);
   }
 
   // ---------- 发现：网页排行榜（免签名） ----------

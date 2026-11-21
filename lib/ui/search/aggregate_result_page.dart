@@ -40,7 +40,7 @@ class _AggregateResultPageState extends ConsumerState<AggregateResultPage> {
       backgroundColor: Colors.transparent,
       body: Stack(
         children: [
-          const Positioned.fill(child: GlassBackground()),
+          const Positioned.fill(child: AppBackground()),
           SafeArea(
             child: Column(
               children: [
@@ -49,7 +49,7 @@ class _AggregateResultPageState extends ConsumerState<AggregateResultPage> {
                   padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
                   child: Row(
                     children: [
-                      GlassRoundButton(
+                      FlatRoundButton(
                         tooltip: '返回',
                         icon: Icons.arrow_back,
                         onTap: () => Navigator.of(context).pop(),
@@ -64,7 +64,7 @@ class _AggregateResultPageState extends ConsumerState<AggregateResultPage> {
                               fontSize: 17, fontWeight: FontWeight.w700),
                         ),
                       ),
-                      GlassRoundButton(
+                      FlatRoundButton(
                         icon: Icons.edit,
                         tooltip: '重新搜索',
                         onTap: () => Navigator.of(context).pushReplacement(
@@ -126,7 +126,7 @@ class _EmptyOrLoading extends StatelessWidget {
     return Center(
       child: running
           ? const CircularProgressIndicator()
-          : Glass(
+          : FlatCard(
               radius: 16,
               padding: const EdgeInsets.symmetric(
                   horizontal: 24, vertical: 24),
@@ -162,7 +162,7 @@ class _AggregatedTileState extends State<_AggregatedTile> {
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
-    return Glass(
+    return FlatCard(
       radius: 12,
       child: Column(
         mainAxisSize: MainAxisSize.min,

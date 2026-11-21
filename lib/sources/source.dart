@@ -18,11 +18,11 @@ abstract class NovelSource {
   /// 书源显示名
   String get sourceName;
 
-  /// 内容类型（novel / comic）
+  /// 内容类型（当前仅 novel；旧值仅用于兼容历史数据）
   ContentType get type;
 
   /// 加载该书源封面/图片时附加的请求头（防盗链 Referer）。
-  /// 默认无；硬编码源按各自 CDN 覆盖（如大人漫画需 Referer: 站点根）。
+  /// 默认无；书源可按目标图片站要求设置 Referer。
   Map<String, String>? get imageHeaders => null;
 
   /// 搜索。失败抛 [SourceException]，由聚合层捕获并按源上报。
@@ -38,7 +38,7 @@ abstract class NovelSource {
     void Function(int pageIndex, List<Chapter> chapters)? onPageChunk,
   });
 
-  /// 章节内容（小说段落 / 漫画图片）
+  /// 小说章节内容（段落文本）
   Future<Content> content(Chapter chapter);
 
   /// 发现页可用标签（空列表 = 该书源不支持发现）。

@@ -32,7 +32,7 @@ class _HomeShellState extends State<HomeShell> {
     return Scaffold(
       body: Stack(
         children: [
-          const Positioned.fill(child: GlassBackground()),
+          const Positioned.fill(child: AppBackground()),
           // 内容区：让内容延伸到屏幕底（悬浮导航条覆盖其上并模糊），
           // 避免内容下缘到屏幕底之间露出裸渐变「遮罩带」。
           // 各页（书架/发现/我的）自带 SafeArea 处理刘海/Home 条。
@@ -63,24 +63,22 @@ class _HomeShellState extends State<HomeShell> {
     final cs = Theme.of(context).colorScheme;
     final activeColor = cs.primary;
     final inactiveColor = cs.onSurfaceVariant;
-    return Glass(
+    return NavGlassBar(
       radius: 28,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: Stack(
         children: [
-          // 液态滑动指示器：选中高亮像液体一样弹性滑到新选中项。
-          // 注意：AnimatedPositioned 必须直接挂在 Stack 下（ParentDataWidget），
-          // 不能再用 IgnorePointer 等包裹，否则 applyParentData 强转 StackParentData 失败。
+          // 宽胶囊滑动指示器：选中高亮为横向拉长的圆角胶囊，包住整项。
+          // AnimatedPositioned 必须直接挂在 Stack 下（ParentDataWidget）。
           AnimatedPositioned(
             duration: const Duration(milliseconds: 340),
             curve: Curves.easeOutBack,
             left: _index * (itemW + 4),
-            top: 4,
-            bottom: 4,
+            top: 0,
+            bottom: 0,
             width: itemW,
             child: IgnorePointer(
               child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 4),
                 decoration: BoxDecoration(
                   color: cs.secondaryContainer,
                   borderRadius: BorderRadius.circular(20),
@@ -88,7 +86,7 @@ class _HomeShellState extends State<HomeShell> {
               ),
             ),
           ),
-          // 三项按钮（内容居中；选中高亮由滑动指示器提供）
+          // 三项按钮（选中高亮由宽胶囊指示器提供）
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -99,30 +97,27 @@ class _HomeShellState extends State<HomeShell> {
                   onTap: () => setState(() => _index = i),
                   child: SizedBox(
                     width: itemW,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            i == _index ? _items[i].$2 : _items[i].$1,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          i == _index ? _items[i].$2 : _items[i].$1,
+                          color: i == _index ? activeColor : inactiveColor,
+                          size: 22,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _items[i].$3,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: i == _index
+                                ? FontWeight.w600
+                                : FontWeight.w400,
                             color: i == _index ? activeColor : inactiveColor,
-                            size: 26,
                           ),
-                          const SizedBox(height: 3),
-                          Text(
-                            _items[i].$3,
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: i == _index
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
-                              color:
-                                  i == _index ? activeColor : inactiveColor,
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ),

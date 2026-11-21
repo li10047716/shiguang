@@ -61,7 +61,6 @@ class RuleSource extends SourceBase {
     return Content(
       title: chapter.title,
       paras: paras.isEmpty ? [text] : paras,
-      kind: _source.type,
     );
   }
 

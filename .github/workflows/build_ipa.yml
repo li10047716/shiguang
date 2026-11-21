@@ -1,0 +1,54 @@
+# 构建 iOS IPA（未签名，供 AltStore / Sideloadly / 爱思助手 自签安装）
+#
+# 说明：IPA 只能在 macOS + Xcode 上构建，本仓库通过 GitHub Actions
+# 提供的 macOS 云构建自动产出。产物为未签名 IPA，可在 Actions 页面
+# 的 Artifacts 中下载，用侧载工具签名后安装到 iPhone/iPad。
+#
+# 触发方式：
+# - 推送到 main 分支自动构建
+# - 手动触发：仓库 Actions 页 → Build iOS IPA → Run workflow
+
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-pub
+
+      # 未签名构建：无需苹果开发者证书
+      - name: Build iOS (no codesign)
+        run: flutter build ios --release --no-codesign
+
+      - name: Package IPA
+        run: |
+          mkdir -p build/ios/Payload
+          cp -R build/ios/iphoneos/Runner.app build/ios/Payload/
+          cd build/ios
+          zip -qry ../reading_app.ipa Payload
+          ls -lh ../reading_app.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: reading_app_ipa
+          path: build/reading_app.ipa
+          if-no-files-found: error

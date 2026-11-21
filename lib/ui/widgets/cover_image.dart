@@ -1,6 +1,6 @@
 /// 带防盗链头的网络封面/图片组件。
 ///
-/// 封面 CDN（如大人漫画 p4p.18rouman.vip）对「无 Referer 请求」会**截断响应**
+/// 部分封面 CDN 对「无 Referer 请求」会截断响应
 /// （RIFF 声明全图大小但只吐前几百字节），`Image.network` 不带任何头，
 /// 解码必然失败 → 灰块。这里改用 [HttpClient.getBytes]（全局 UA + 书源
 /// 自己的 Referer），并在内存缓存字节，多卡片复用同一 Future。
@@ -32,7 +32,7 @@ class CoverImage extends StatefulWidget {
   final double? width;
   final double? height;
 
-  /// 是否缓存字节（封面小图缓存；漫画整页大图不缓存，避免内存膨胀）。
+  /// 是否缓存字节（封面小图默认缓存，避免重复请求）。
   final bool cache;
 
   /// 加载中占位（默认灰块+图标）；传 [loadingWidget] 可自定义（如进度圈）。

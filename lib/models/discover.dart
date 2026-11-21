@@ -14,6 +14,19 @@ class DiscoverTab {
     required this.name,
     required this.isRank,
   });
+
+  // 选中态比较用值语义：书源刷新后 discoverTabs 会重建对象，
+  // 仅靠引用相等会导致已选标签失去高亮。
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DiscoverTab &&
+          other.key == key &&
+          other.isRank == isRank &&
+          other.name == name;
+
+  @override
+  int get hashCode => Object.hash(key, isRank, name);
 }
 
 /// 一页发现内容（某榜单/分类的第 page 页）。
