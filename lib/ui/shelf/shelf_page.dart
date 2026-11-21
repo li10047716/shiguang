@@ -884,8 +884,11 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     return FlatCard(
       radius: 14,
       shadow: false,
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      child: Row(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      // 固定高度与左侧搜索框(40)对齐，内部元素垂直居中
+      child: SizedBox(
+        height: 40,
+        child: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
           // 全部▾ 筛选（类型 + 分组）
@@ -979,6 +982,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
             ),
           ),
       ],
+      ),
       ),
     );
   }

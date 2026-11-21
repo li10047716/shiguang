@@ -69,13 +69,14 @@ class _HomeShellState extends State<HomeShell> {
       child: Stack(
         children: [
           // 宽胶囊滑动指示器：选中高亮为横向拉长的圆角胶囊，包住整项。
+          // 上下各留 2px 空隙不贴到导航条边缘。
           // AnimatedPositioned 必须直接挂在 Stack 下（ParentDataWidget）。
           AnimatedPositioned(
             duration: const Duration(milliseconds: 340),
             curve: Curves.easeOutBack,
             left: _index * (itemW + 4),
-            top: 0,
-            bottom: 0,
+            top: 2,
+            bottom: 2,
             width: itemW,
             child: IgnorePointer(
               child: Container(
@@ -86,43 +87,49 @@ class _HomeShellState extends State<HomeShell> {
               ),
             ),
           ),
-          // 三项按钮（选中高亮由宽胶囊指示器提供）
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var i = 0; i < _items.length; i++) ...[
-                if (i > 0) const SizedBox(width: 4),
-                InkWell(
-                  borderRadius: BorderRadius.circular(50),
-                  onTap: () => setState(() => _index = i),
-                  child: SizedBox(
-                    width: itemW,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          i == _index ? _items[i].$2 : _items[i].$1,
-                          color: i == _index ? activeColor : inactiveColor,
-                          size: 22,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _items[i].$3,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: i == _index
-                                ? FontWeight.w600
-                                : FontWeight.w400,
+          // 三项按钮（选中高亮由宽胶囊指示器提供）；
+          // 上下 8px 内边距让胶囊比内容更高
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var i = 0; i < _items.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 4),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(50),
+                    onTap: () => setState(() => _index = i),
+                    child: SizedBox(
+                      width: itemW,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            i == _index ? _items[i].$2 : _items[i].$1,
                             color: i == _index ? activeColor : inactiveColor,
+                            size: 22,
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 4),
+                          Text(
+                            _items[i].$3,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: i == _index
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                              color: i == _index
+                                  ? activeColor
+                                  : inactiveColor,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
+                ],
               ],
-            ],
+            ),
           ),
         ],
       ),

@@ -464,96 +464,102 @@ class _DiscoverPageState extends State<DiscoverPage>
     );
   }
 
-  // ---------- 左侧常驻栏：只保留「推荐 / 分类」两个顶级入口 ----------
+  // ---------- 左侧常驻栏：当前分区的二级标签（竖排） ----------
 
   Widget _categoryRail(bool isMobile) {
-    if (_ranks.isEmpty && _cats.isEmpty) return const SizedBox.shrink();
-    return FlatCard(
-      radius: 16,
-      blur: 3,
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-      // 按内容收缩高度：白色底框只包住“推荐/分类”按钮，不再铺到应用底部
-      child: ListView(
-        padding: EdgeInsets.zero,
-        shrinkWrap: true,
-        primary: false,
-        children: [
-          if (_ranks.isNotEmpty) _railSection('推荐', true, isMobile),
-          if (_cats.isNotEmpty) _railSection('分类', false, isMobile),
-        ],
+    final tabs = _sectionRank ? _ranks : _cats;
+    if (tabs.isEmpty) return const SizedBox.shrink();
+    final cs = Theme.of(context).colorScheme;
+    // 标签多时卡片内部滚动，最高不超过一屏
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height - 100,
+      ),
+      child: FlatCard(
+        radius: 16,
+        blur: 3,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+        child: ListView(
+          padding: EdgeInsets.zero,
+          shrinkWrap: true,
+          primary: false,
+          children: [
+            for (final t in tabs)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: GestureDetector(
+                  onTap: () => _pickTab(t),
+                  child: Container(
+                    padding: EdgeInsets.symmetric(
+                        vertical: isMobile ? 7 : 8, horizontal: 4),
+                    decoration: BoxDecoration(
+                      color: t == _tab
+                          ? cs.primary
+                          : cs.surfaceContainerHigh,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color:
+                            t == _tab ? cs.primary : cs.outlineVariant,
+                      ),
+                    ),
+                    child: Text(
+                      t.name,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: isMobile ? 11 : 12,
+                        fontWeight:
+                            t == _tab ? FontWeight.w700 : FontWeight.w500,
+                        color: t == _tab
+                            ? cs.onPrimary
+                            : cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _railSection(String label, bool rank, bool isMobile) {
-    final active = rank == _sectionRank;
+  /// 右侧顶部固定条：「推荐 / 分类」两个顶级入口（不随内容滑动）。
+  Widget _sectionChips(bool isMobile) {
     final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: GestureDetector(
+    Widget chip(String label, bool rank) {
+      final active = rank == _sectionRank;
+      return GestureDetector(
         onTap: () => _pickSection(rank),
         child: Container(
-          padding: EdgeInsets.symmetric(vertical: isMobile ? 7 : 8),
+          padding: EdgeInsets.symmetric(
+              horizontal: isMobile ? 14 : 16, vertical: 7),
           decoration: BoxDecoration(
             color: active ? cs.primary : cs.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(18),
             border: Border.all(
               color: active ? cs.primary : cs.outlineVariant,
             ),
           ),
           child: Text(
             label,
-            textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: isMobile ? 12 : 13,
-              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              fontWeight: active ? FontWeight.w700 : FontWeight.w400,
               color: active ? cs.onPrimary : cs.onSurfaceVariant,
             ),
           ),
         ),
-      ),
-    );
-  }
-
-  // ---------- 右侧二级标签：在书籍卡片上方显示 ----------
-
-  Widget _tabChips(bool isMobile) {
-    final tabs = _sectionRank ? _ranks : _cats;
-    if (tabs.isEmpty) return const SizedBox.shrink();
-    final chips = [for (final t in tabs) _tabChip(t, isMobile)];
-    if (isMobile) {
-      return SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(children: chips),
       );
     }
-    return Wrap(spacing: 8, runSpacing: 8, children: chips);
-  }
 
-  Widget _tabChip(DiscoverTab t, bool isMobile) {
-    final active = t == _tab;
-    final cs = Theme.of(context).colorScheme;
-    return GestureDetector(
-      onTap: () => _pickTab(t),
-      child: Container(
-        padding:
-            EdgeInsets.symmetric(horizontal: isMobile ? 12 : 14, vertical: 7),
-        decoration: BoxDecoration(
-          color: active ? cs.primary : cs.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: active ? cs.primary : cs.outlineVariant,
-          ),
-        ),
-        child: Text(
-          t.name,
-          style: TextStyle(
-            fontSize: isMobile ? 12 : 13,
-            fontWeight: active ? FontWeight.w700 : FontWeight.w400,
-            color: active ? cs.onPrimary : cs.onSurfaceVariant,
-          ),
-        ),
-      ),
+    return Row(
+      children: [
+        chip('推荐', true),
+        const SizedBox(width: 8),
+        chip('分类', false),
+      ],
     );
   }
 
@@ -578,34 +584,31 @@ class _DiscoverPageState extends State<DiscoverPage>
 
   Widget _bookArea(double width, bool isMobile) {
     final columns = width >= 1100 ? 4 : 3;
-    return RefreshIndicator(
-      onRefresh: _refresh,
-      child: ScrollConfiguration(
-        behavior: ScrollConfiguration.of(context).copyWith(
-          dragDevices: {
-            PointerDeviceKind.touch,
-            PointerDeviceKind.mouse,
-            PointerDeviceKind.stylus,
-            PointerDeviceKind.trackpad,
-          },
+    // 顶部「推荐/分类」固定不随内容滑动，书库在下方独立滚动
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: _sectionChips(isMobile),
         ),
-        child: CustomScrollView(
-          controller: _scrollCtrl,
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            SliverToBoxAdapter(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _listHeader(),
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _tabChips(isMobile),
-                  ),
-                ],
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _refresh,
+            child: ScrollConfiguration(
+              behavior: ScrollConfiguration.of(context).copyWith(
+                dragDevices: {
+                  PointerDeviceKind.touch,
+                  PointerDeviceKind.mouse,
+                  PointerDeviceKind.stylus,
+                  PointerDeviceKind.trackpad,
+                },
               ),
-            ),
-            if (_error != null && _books.isEmpty)
+              child: CustomScrollView(
+                controller: _scrollCtrl,
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: [
+                  if (_error != null && _books.isEmpty)
               SliverFillRemaining(
                 hasScrollBody: false,
                 child: _errorView(),
@@ -678,22 +681,9 @@ class _DiscoverPageState extends State<DiscoverPage>
           ],
         ),
       ),
-    );
-  }
-
-  Widget _listHeader() {
-    final cs = Theme.of(context).colorScheme;
-    if (_pages <= 1) return const SizedBox.shrink();
-    // 只保留页码，不再显示“推荐 / 分类”字样
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Align(
-        alignment: Alignment.centerRight,
-        child: Text(
-          '$_page/$_pages 页',
-          style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+          ),
         ),
-      ),
+      ],
     );
   }
 
