@@ -470,57 +470,47 @@ class _DiscoverPageState extends State<DiscoverPage>
     final tabs = _sectionRank ? _ranks : _cats;
     if (tabs.isEmpty) return const SizedBox.shrink();
     final cs = Theme.of(context).colorScheme;
-    // 标签多时卡片内部滚动，最高不超过一屏
+    // 标签多时内部滚动，最高不超过一屏（无白色卡片底框）
     return ConstrainedBox(
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height - 100,
       ),
-      child: FlatCard(
-        radius: 16,
-        blur: 3,
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-        child: ListView(
-          padding: EdgeInsets.zero,
-          shrinkWrap: true,
-          primary: false,
-          children: [
-            for (final t in tabs)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: GestureDetector(
-                  onTap: () => _pickTab(t),
-                  child: Container(
-                    padding: EdgeInsets.symmetric(
-                        vertical: isMobile ? 7 : 8, horizontal: 4),
-                    decoration: BoxDecoration(
-                      color: t == _tab
-                          ? cs.primary
-                          : cs.surfaceContainerHigh,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color:
-                            t == _tab ? cs.primary : cs.outlineVariant,
-                      ),
+      child: ListView(
+        padding: EdgeInsets.zero,
+        shrinkWrap: true,
+        primary: false,
+        children: [
+          for (final t in tabs)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: GestureDetector(
+                onTap: () => _pickTab(t),
+                child: Container(
+                  padding: EdgeInsets.symmetric(
+                      vertical: isMobile ? 7 : 8, horizontal: 4),
+                  decoration: BoxDecoration(
+                    color: t == _tab ? cs.primary : cs.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: t == _tab ? cs.primary : cs.outlineVariant,
                     ),
-                    child: Text(
-                      t.name,
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: isMobile ? 11 : 12,
-                        fontWeight:
-                            t == _tab ? FontWeight.w700 : FontWeight.w500,
-                        color: t == _tab
-                            ? cs.onPrimary
-                            : cs.onSurfaceVariant,
-                      ),
+                  ),
+                  child: Text(
+                    t.name,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: isMobile ? 11 : 12,
+                      fontWeight:
+                          t == _tab ? FontWeight.w700 : FontWeight.w500,
+                      color: t == _tab ? cs.onPrimary : cs.onSurfaceVariant,
                     ),
                   ),
                 ),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -568,7 +558,7 @@ class _DiscoverPageState extends State<DiscoverPage>
   Widget _body() {
     final width = MediaQuery.of(context).size.width;
     final isMobile = width < 600;
-    final railWidth = isMobile ? 60.0 : 110.0;
+    final railWidth = isMobile ? 76.0 : 126.0;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 60, 16, 0),
       child: Row(
