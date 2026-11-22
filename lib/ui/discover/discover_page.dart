@@ -80,6 +80,7 @@ class _DiscoverPageState extends State<DiscoverPage>
   void dispose() {
     SourceRegistry().removeListener(_onSourcesChanged);
     _scrollCtrl.dispose();
+    _tagCtrl.dispose();
     _closeSourceMenu();
     super.dispose();
   }
@@ -464,53 +465,84 @@ class _DiscoverPageState extends State<DiscoverPage>
     );
   }
 
-  // ---------- 左侧常驻栏：当前分区的二级标签（竖排） ----------
+  // ---------- 顶部固定二级标签行（横向滑动，不随内容滚动） ----------
 
-  Widget _categoryRail(bool isMobile) {
+  final ScrollController _tagCtrl = ScrollController();
+  final GlobalKey _selTagKey = GlobalKey();
+
+  /// 保证选中的标签滚进可视区域（切换分区/标签后自动定位）
+  void _ensureSelectedTagVisible() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_tagCtrl.hasClients) return;
+      final ctx = _selTagKey.currentContext;
+      if (ctx == null) return;
+      final box = ctx.findRenderObject();
+      if (box is! RenderBox || !box.attached) return;
+      final scrollObj =
+          _tagCtrl.position.context.storageContext.findRenderObject();
+      if (scrollObj is! RenderBox || !scrollObj.attached) return;
+      final left =
+          scrollObj.globalToLocal(box.localToGlobal(Offset.zero)).dx;
+      final right = left + box.size.width;
+      final vp = _tagCtrl.position.viewportDimension;
+      if (left < 0 || right > vp) {
+        final target = _tagCtrl.offset + (left < 0 ? left : right - vp);
+        _tagCtrl.animateTo(
+          target.clamp(0.0, _tagCtrl.position.maxScrollExtent),
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  Widget _tagRow(bool isMobile) {
     final tabs = _sectionRank ? _ranks : _cats;
     if (tabs.isEmpty) return const SizedBox.shrink();
     final cs = Theme.of(context).colorScheme;
-    // 标签多时内部滚动，最高不超过一屏（无白色卡片底框）
-    return ConstrainedBox(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height - 100,
-      ),
-      child: ListView(
+    _ensureSelectedTagVisible();
+    return SizedBox(
+      height: isMobile ? 32 : 36,
+      child: SingleChildScrollView(
+        controller: _tagCtrl,
+        scrollDirection: Axis.horizontal,
         padding: EdgeInsets.zero,
-        shrinkWrap: true,
-        primary: false,
-        children: [
-          for (final t in tabs)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: GestureDetector(
-                onTap: () => _pickTab(t),
-                child: Container(
-                  padding: EdgeInsets.symmetric(
-                      vertical: isMobile ? 7 : 8, horizontal: 4),
-                  decoration: BoxDecoration(
-                    color: t == _tab ? cs.primary : cs.surfaceContainerHigh,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: t == _tab ? cs.primary : cs.outlineVariant,
+        child: Row(
+          children: [
+            for (final t in tabs)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: GestureDetector(
+                  onTap: () => _pickTab(t),
+                  child: Container(
+                    key: t == _tab ? _selTagKey : null,
+                    padding: EdgeInsets.symmetric(
+                        horizontal: isMobile ? 12 : 14, vertical: 5),
+                    decoration: BoxDecoration(
+                      color:
+                          t == _tab ? cs.primary : cs.surfaceContainerHigh,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: t == _tab ? cs.primary : cs.outlineVariant,
+                      ),
                     ),
-                  ),
-                  child: Text(
-                    t.name,
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: isMobile ? 11 : 12,
-                      fontWeight:
-                          t == _tab ? FontWeight.w700 : FontWeight.w500,
-                      color: t == _tab ? cs.onPrimary : cs.onSurfaceVariant,
+                    child: Text(
+                      t.name,
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: isMobile ? 12 : 13,
+                        fontWeight:
+                            t == _tab ? FontWeight.w700 : FontWeight.w500,
+                        color: t == _tab
+                            ? cs.onPrimary
+                            : cs.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -553,34 +585,30 @@ class _DiscoverPageState extends State<DiscoverPage>
     );
   }
 
-  // ---------- 内容：左侧常驻栏 + 右侧书库（桌面多列 / 手机单列） ----------
+  // ---------- 内容：顶部固定条 + 书库铺满全宽（桌面多列 / 手机单列） ----------
 
   Widget _body() {
     final width = MediaQuery.of(context).size.width;
     final isMobile = width < 600;
-    final railWidth = isMobile ? 76.0 : 126.0;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 60, 16, 0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(width: railWidth, child: _categoryRail(isMobile)),
-          SizedBox(width: isMobile ? 10 : 14),
-          Expanded(child: _bookArea(width, isMobile)),
-        ],
-      ),
+      child: _bookArea(width, isMobile),
     );
   }
 
   Widget _bookArea(double width, bool isMobile) {
     final columns = width >= 1100 ? 4 : 3;
-    // 顶部「推荐/分类」固定不随内容滑动，书库在下方独立滚动
+    // 顶部「推荐/分类」+ 二级标签行固定不随内容滑动，书库在下方独立滚动
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: _sectionChips(isMobile),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: _tagRow(isMobile),
         ),
         Expanded(
           child: RefreshIndicator(
