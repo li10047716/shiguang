@@ -16,8 +16,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../models/book.dart';
 import '../../models/book_source.dart';
+import '../../services/book_export.dart';
+import '../../services/chapter_cache.dart';
 import '../../services/library.dart';
 import '../../services/toc_cache.dart';
+import '../../services/update_checker.dart';
 import '../../sources/native/localbook.dart';
 import '../../sources/source_registry.dart';
 import '../book/book_detail_page.dart';
@@ -132,62 +135,37 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
                         ),
                       ),
               ),
-              // 下拉提示：文字浮在顶部空白处，书卡下移时渐显
-              if (_pullOffset > 2 || _pullRefreshing)
+              // 下拉提示：白色圆形卡片 + 蓝色转圈；放在工具栏下方空白处，
+              // 避免贴屏幕最上方被手机状态栏/工具栏遮挡；松手后由封面转圈接管
+              if (_pullOffset > 2 && !_pullRefreshing)
                 Positioned(
-                  top: 0,
+                  top: 60,
                   left: 0,
                   right: 0,
                   child: Center(
                     child: AnimatedOpacity(
-                      opacity: _pullRefreshing
-                          ? 1
-                          : (_pullOffset / 40).clamp(0.0, 1.0),
+                      opacity: (_pullOffset / 40).clamp(0.0, 1.0),
                       duration: const Duration(milliseconds: 100),
+                      // 样式与发现页标准 RefreshIndicator 一致：
+                      // 40dp 白色圆形容器 + 主题主色（绿色）圆弧箭头（全程显示箭头，非进度环弧线）
                       child: Container(
-                        margin: const EdgeInsets.only(top: 10),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 7),
+                        width: 40,
+                        height: 40,
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primary,
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (_pullRefreshing)
-                              SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color:
-                                      Theme.of(context).colorScheme.onPrimary,
-                                ),
-                              )
-                            else
-                              Icon(
-                                _pullRaw >= _pullTrigger
-                                    ? Icons.update
-                                    : Icons.keyboard_arrow_down,
-                                size: 16,
-                                color:
-                                    Theme.of(context).colorScheme.onPrimary,
-                              ),
-                            const SizedBox(width: 6),
-                            Text(
-                              _pullRefreshing
-                                  ? '正在检查更新…'
-                                  : _pullRaw >= _pullTrigger
-                                      ? '松开检查更新'
-                                      : '下拉检查更新',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color:
-                                    Theme.of(context).colorScheme.onPrimary,
-                              ),
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black26,
+                              blurRadius: 6,
+                              spreadRadius: 1,
                             ),
                           ],
+                        ),
+                        child: Icon(
+                          Icons.refresh,
+                          color: Theme.of(context).colorScheme.primary,
+                          size: 24,
                         ),
                       ),
                     ),
@@ -264,109 +242,184 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   }
 
 
-  /// 长按卡片：书籍操作面板（封面 + 信息 + 功能图标 + 列表 + 删除）。
-  /// 只放本应用已有的功能：书本详情 / 更换书源 / 移动分组 / 删除书籍。
+  /// 长按卡片：书籍操作面板（信息卡 + 功能宫格 + 分组/下载/删除行）。
   Future<void> _showBookMenu(Book b) async {
     final group = _groupOf[b.bookUrl];
+    final sp = await SharedPreferences.getInstance();
+    // 更新开关：默认开启，只有显式存了 false 才是关闭。
+    var autoUpdate = sp.getBool('auto_update_${b.bookUrl}') ?? true;
+    var autoDownload = sp.getBool('auto_download_${b.bookUrl}') ?? false;
+    if (!mounted) return;
     await showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.transparent,
-      builder: (context) => FlatCard(
-        radius: 24,
-        blur: 3,
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 顶部：封面 + 书名/作者/来源/分组
-            Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: SizedBox(
-                    width: 56,
-                    height: 74,
-                    child: b.cover.isEmpty
-                        ? ColoredBox(
-                            color: Colors.grey.shade200,
-                            child: const Icon(Icons.menu_book,
-                                color: Colors.grey))
-                        : CoverImage(b.cover,
-                            sourceId: b.sourceId, fit: BoxFit.cover),
-                  ),
+      isScrollControlled: true,
+      builder: (context) {
+        final cs = Theme.of(context).colorScheme;
+        return StatefulBuilder(
+          builder: (context, setSheetState) => SingleChildScrollView(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                  16, 12, 16, MediaQuery.of(context).padding.bottom + 8),
+              child: FlatCard(
+                radius: 24,
+                blur: 3,
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // 顶部：封面 + 书名/作者/来源/分组
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: SizedBox(
+                            width: 56,
+                            height: 74,
+                            child: b.cover.isEmpty
+                                ? ColoredBox(
+                                    color: Colors.grey.shade200,
+                                    child: const Icon(Icons.menu_book,
+                                        color: Colors.grey))
+                                : CoverImage(b.cover,
+                                    sourceId: b.sourceId, fit: BoxFit.cover),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(b.name,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700)),
+                              const SizedBox(height: 4),
+                              Text('作者: ${b.author.isEmpty ? '未知' : b.author}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: 12, color: Colors.grey.shade600)),
+                              const SizedBox(height: 2),
+                              Text('来源: ${b.sourceName}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: 12, color: Colors.grey.shade600)),
+                              const SizedBox(height: 2),
+                              Text('分组: ${group ?? '全部'}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: 12, color: Colors.grey.shade600)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    const Divider(height: 1),
+                    const SizedBox(height: 14),
+                    // 功能宫格：书本详情 / 编辑书本 / 关闭更新 / 清除缓存 / 导出
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 10,
+                      children: [
+                        SizedBox(
+                            width: 72,
+                            child: _menuIcon(Icons.info_outline, '书本详情', () {
+                              Navigator.pop(context);
+                              _openBookDetail(b);
+                            })),
+                        SizedBox(
+                            width: 72,
+                            child: _menuIcon(Icons.edit_outlined, '编辑书本', () {
+                              Navigator.pop(context);
+                              _editBook(b);
+                            })),
+                        SizedBox(
+                            width: 72,
+                            child: _menuIcon(
+                                autoUpdate
+                                    ? Icons.notifications_active_outlined
+                                    : Icons.notifications_off_outlined,
+                                autoUpdate ? '关闭更新' : '开启更新', () async {
+                              final v = !autoUpdate;
+                              await sp.setBool('auto_update_${b.bookUrl}', v);
+                              if (context.mounted) {
+                                setSheetState(() => autoUpdate = v);
+                              }
+                            }, color: autoUpdate ? cs.primary : null)),
+                        SizedBox(
+                            width: 72,
+                            child: _menuIcon(
+                                Icons.cleaning_services_outlined, '清除缓存',
+                                () {
+                              Navigator.pop(context);
+                              _clearBookCache(b);
+                            })),
+                        SizedBox(
+                            width: 72,
+                            child: _menuIcon(Icons.ios_share, '导出', () {
+                              Navigator.pop(context);
+                              _exportBook(b);
+                            })),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    // 移动分组
+                    _menuRow(Icons.drive_file_move_outline, '移动分组', () {
+                      Navigator.pop(context);
+                      _moveGroup(b);
+                    }),
+                    const SizedBox(height: 8),
+                    // 自动下载：开关
+                    Container(
+                      decoration: BoxDecoration(
+                        color: cs.surfaceContainerHigh,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                            color: cs.outlineVariant.withValues(alpha: 0.5)),
+                      ),
+                      child: SwitchListTile(
+                        value: autoDownload,
+                        onChanged: (v) async {
+                          await sp.setBool('auto_download_${b.bookUrl}', v);
+                          if (context.mounted) {
+                            setSheetState(() => autoDownload = v);
+                          }
+                        },
+                        activeTrackColor: cs.primary,
+                        thumbColor: const WidgetStatePropertyAll(Colors.white),
+                        secondary: Icon(Icons.download_for_offline_outlined,
+                            color: cs.onSurfaceVariant),
+                        title: const Text('自动下载',
+                            style: TextStyle(
+                                fontSize: 15, color: Color(0xFF222222))),
+                        subtitle: const Text('开启后自动缓存新章节',
+                            style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 2),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // 删除书籍
+                    _menuRow(Icons.delete_outline, '删除书籍', () {
+                      Navigator.pop(context);
+                      _removeBook(b);
+                    }, color: const Color(0xFFE5484D)),
+                  ],
                 ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(b.name,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 4),
-                      Text(b.author.isEmpty ? '未知作者' : b.author,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade600)),
-                      const SizedBox(height: 2),
-                      Text('来源: ${b.sourceName}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade600)),
-                      const SizedBox(height: 2),
-                      Text('分组: ${group ?? '全部'}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade600)),
-                    ],
-                  ),
-                ),
-              ],
+              ),
             ),
-            const SizedBox(height: 16),
-            // 圆形图标行
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _menuIcon(Icons.info_outline, '书本详情', () {
-                  Navigator.pop(context);
-                  _openBookDetail(b);
-                }),
-                _menuIcon(Icons.swap_horiz, '更换书源', () {
-                  Navigator.pop(context);
-                  _openBookDetail(b);
-                }),
-                _menuIcon(Icons.drive_file_move_outline, '移动分组', () {
-                  Navigator.pop(context);
-                  _moveGroup(b);
-                }),
-                _menuIcon(Icons.delete_outline, '删除书籍', () {
-                  Navigator.pop(context);
-                  _removeBook(b);
-                }, color: const Color(0xFFE5484D)),
-              ],
-            ),
-            const SizedBox(height: 10),
-            const Divider(height: 1),
-            _menuRow(Icons.drive_file_move_outline, '移动分组', () {
-              Navigator.pop(context);
-              _moveGroup(b);
-            }),
-            const Divider(height: 1),
-            _menuRow(Icons.delete_outline, '删除书籍', () {
-              Navigator.pop(context);
-              _removeBook(b);
-            }, color: const Color(0xFFE5484D)),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -400,17 +453,28 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
 
   Widget _menuRow(IconData icon, String label, VoidCallback onTap,
       {Color? color}) {
+    final cs = Theme.of(context).colorScheme;
     return InkWell(
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         child: Row(
           children: [
-            Icon(icon, size: 20, color: color ?? Colors.grey.shade700),
+            Icon(icon, size: 20, color: color ?? cs.onSurfaceVariant),
             const SizedBox(width: 12),
-            Text(label,
-                style: TextStyle(
-                    fontSize: 15, color: color ?? const Color(0xFF222222))),
+            Expanded(
+              child: Text(label,
+                  style: TextStyle(
+                      fontSize: 15,
+                      color: color ?? const Color(0xFF222222))),
+            ),
+            Icon(Icons.chevron_right, size: 18, color: cs.outlineVariant),
           ],
         ),
       ),
@@ -421,6 +485,99 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => BookDetailPage(book: b)),
     );
+  }
+
+  /// 编辑书本：修改书名与作者。
+  Future<void> _editBook(Book b) async {
+    final nameCtrl = TextEditingController(text: b.name);
+    final authorCtrl = TextEditingController(text: b.author);
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.transparent,
+      builder: (context) => FlatDialog(
+        child: FlatCard(
+          radius: 20,
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('编辑书本',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 16),
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: '书名'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: authorCtrl,
+                decoration: const InputDecoration(labelText: '作者'),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('取消')),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('保存')),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (ok != true) return;
+    await ref
+        .read(libraryProvider.notifier)
+        .updateBook(b.bookUrl, name: nameCtrl.text, author: authorCtrl.text);
+  }
+
+  /// 清除本书已缓存章节。
+  Future<void> _clearBookCache(Book b) async {
+    if (!await _confirm('清除「${b.name}」的全部章节缓存？')) return;
+    final n = await ChapterCache.clearBook(b.bookUrl);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已清除 $n 章缓存'), duration: const Duration(seconds: 1)),
+      );
+    }
+  }
+
+  /// 导出全书为 TXT（先下载正文，再合成保存到本地）。
+  Future<void> _exportBook(Book b) async {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final ok = await BookExport.exportToTxt(
+        b,
+        onProgress: (done, total, phase) {
+          // 进度通过 SnackBar 短暂展示；下载阶段只在首尾提示，避免刷屏。
+          if (done == 0 || done == total || phase != '正在下载正文…') {
+            // ignore: use_build_context_synchronously
+            if (mounted) {
+              messenger.showSnackBar(SnackBar(
+                content: Text(total > 0 ? '$phase $done/$total' : phase),
+                duration: const Duration(milliseconds: 800),
+              ));
+            }
+          }
+        },
+      );
+      if (mounted) {
+        messenger.showSnackBar(
+            SnackBar(content: Text(ok ? '已导出 TXT' : '已取消导出')));
+      }
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(SnackBar(content: Text('导出失败：$e')));
+      }
+    }
   }
 
   Future<void> _removeBook(Book b) async {
@@ -1287,27 +1444,15 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   Future<int> _checkUpdates() async {
     // 按当前书架显示顺序检查：分组过滤 + 管理模式排序/最近阅读置顶
     final books = _displayOrder(_visibleBooks(ref.read(libraryProvider)));
-    final sp = await SharedPreferences.getInstance();
-    var updated = 0;
-    for (final b in books) {
-      if (b.type != ContentType.novel) continue;
-      final source = SourceRegistry().byId(b.sourceId);
-      if (source == null) continue;
-      if (mounted) setState(() => _checkingBooks.add(b.bookUrl));
-      try {
-        final toc =
-            await source.loadToc(b).timeout(const Duration(seconds: 15));
-        final newCount = toc.chapters.length;
-        final oldKey = 'update_count_${b.bookUrl}';
-        final oldCount = sp.getInt(oldKey);
-        if (oldCount != null && newCount > oldCount) updated++;
-        await sp.setInt(oldKey, newCount);
-      } catch (_) {
-      } finally {
-        if (mounted) setState(() => _checkingBooks.remove(b.bookUrl));
-      }
-    }
-    return updated;
+    return UpdateChecker.check(
+      books: books,
+      onBookStart: (url) {
+        if (mounted) setState(() => _checkingBooks.add(url));
+      },
+      onBookEnd: (url) {
+        if (mounted) setState(() => _checkingBooks.remove(url));
+      },
+    );
   }
 
   Future<void> _loadProgress() async {
@@ -1481,7 +1626,7 @@ class _BookCard extends StatelessWidget {
   /// 最近阅读时间戳（progress_time_），供「X分钟前: 最新章节」显示
   final Map<String, int> times;
 
-  /// 正在检查更新：封面右下角显示转圈
+  /// 正在检查更新：封面中央显示蓝色转圈
   final bool checkingUpdate;
 
   final bool list;
@@ -1582,22 +1727,20 @@ class _BookCard extends StatelessWidget {
               ),
             ),
             if (checkingUpdate)
-              Positioned(
-                right: 5,
-                bottom: 5,
+              Positioned.fill(
                 child: Tooltip(
                   message: '正在检查更新',
                   child: Container(
-                    width: 24,
-                    height: 24,
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      shape: BoxShape.circle,
-                    ),
-                    padding: const EdgeInsets.all(4),
-                    child: const CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
+                    color: Colors.black26,
+                    child: const Center(
+                      child: SizedBox(
+                        width: 34,
+                        height: 34,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 3,
+                          color: Color(0xFF3E8EF7),
+                        ),
+                      ),
                     ),
                   ),
                 ),

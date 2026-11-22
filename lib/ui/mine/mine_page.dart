@@ -20,6 +20,7 @@ import '../../services/library.dart';
 import '../../services/toc_cache.dart';
 import '../../sources/builtin/builtin_sources.dart';
 import '../../sources/source_registry.dart';
+import '../app_theme.dart';
 import '../book/book_detail_page.dart';
 import '../glass.dart';
 import 'cache_manager_page.dart';
@@ -27,7 +28,8 @@ import '../reader/reader_prefs.dart';
 import '../widgets/cover_image.dart';
 import '../widgets/type_tag.dart';
 
-const _accent = Color(0xFF2E7D5B);
+/// 跟随全局主题色（ About 页图标/开关等装饰色与之一致）
+Color get _accent => AppTheme.accent.value;
 
 // ---------- 公共工具 ----------
 
@@ -112,6 +114,8 @@ class _MinePageState extends ConsumerState<MinePage> {
     final system = <(IconData, String, VoidCallback)>[
       (Icons.chrome_reader_mode_outlined, '阅读设置',
           () => _push('阅读设置', const _ReaderSettingsPage())),
+      (Icons.palette_outlined, '主题色',
+          () => _push('主题色', const _ThemeColorPage())),
       (Icons.cloud_sync_outlined, '备份管理',
           () => _push('备份管理', const _BackupPage())),
       (Icons.cleaning_services_outlined, '清除缓存',
@@ -1041,7 +1045,7 @@ class _AboutPageState extends State<_AboutPage> {
                 color: _accent.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: const Icon(Icons.menu_book, size: 40, color: _accent),
+              child: Icon(Icons.menu_book, size: 40, color: _accent),
             ),
             const SizedBox(height: 14),
             const Text('悦读',
@@ -1151,6 +1155,92 @@ class _SubPage extends StatelessWidget {
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------- 子页：主题色（作用于整个应用，与阅读背景无关） ----------
+
+class _ThemeColorPage extends StatelessWidget {
+  const _ThemeColorPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<Color>(
+      valueListenable: AppTheme.accent,
+      builder: (context, accent, _) {
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+          children: [
+            FlatCard(
+              radius: 16,
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('应用主题色',
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF555555))),
+                  const SizedBox(height: 8),
+                  const Text('作用于整个应用（导航、按钮、刷新圈等），与阅读界面的背景设置相互独立。',
+                      style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      for (var i = 0; i < AppTheme.accents.length; i++)
+                        _swatch(i, accent),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _swatch(int i, Color current) {
+    final color = AppTheme.accents[i];
+    final selected = color.toARGB32() == current.toARGB32();
+    return GestureDetector(
+      onTap: () async {
+        AppTheme.accent.value = color;
+        final sp = await SharedPreferences.getInstance();
+        await sp.setInt('accent_color', color.toARGB32());
+      },
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: selected ? const Color(0xFF222222) : Colors.transparent,
+                width: 2,
+              ),
+              boxShadow: selected
+                  ? [BoxShadow(color: color.withValues(alpha: 0.4), blurRadius: 8)]
+                  : null,
+            ),
+            child: selected
+                ? const Icon(Icons.check, color: Colors.white, size: 22)
+                : null,
+          ),
+          const SizedBox(height: 6),
+          Text(AppTheme.accentNames[i],
+              style: TextStyle(
+                  fontSize: 12,
+                  color: selected ? const Color(0xFF222222) : Colors.grey)),
         ],
       ),
     );

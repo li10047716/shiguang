@@ -38,6 +38,27 @@ class LibraryService extends StateNotifier<List<Book>> {
 
   bool inShelf(Book book) => state.any((b) => b.bookUrl == book.bookUrl);
 
+  /// 编辑书本：按 bookUrl 原位替换书名/作者（其它字段保留）并落盘。
+  Future<void> updateBook(String bookUrl,
+      {required String name, required String author}) async {
+    state = state
+        .map((b) => b.bookUrl == bookUrl
+            ? Book(
+                name: name.trim().isEmpty ? b.name : name.trim(),
+                author: author.trim(),
+                cover: b.cover,
+                bookUrl: b.bookUrl,
+                sourceId: b.sourceId,
+                sourceName: b.sourceName,
+                type: b.type,
+                lastChapter: b.lastChapter,
+                intro: b.intro,
+              )
+            : b)
+        .toList();
+    await _save();
+  }
+
   /// 批量删除（书架管理）
   Future<void> removeMany(List<Book> books) async {
     final urls = books.map((b) => b.bookUrl).toSet();

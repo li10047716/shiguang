@@ -4,8 +4,11 @@
 /// 用 [IndexedStack] 保留各页状态。
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../services/update_checker.dart';
 import 'discover/discover_page.dart';
 import 'glass.dart';
 import 'mine/mine_page.dart';
@@ -18,14 +21,61 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   int _index = 0;
+
+  // 定时检查更新：冷启动查一次 + 每次从后台回前台查一次。
+  // 用时间戳去重，避免启动瞬间 resumed 与 initState 重复触发。
+  DateTime? _lastAutoCheck;
+  Timer? _startupTimer;
 
   static const _items = [
     (Icons.library_books_outlined, Icons.library_books, '书架'),
     (Icons.explore_outlined, Icons.explore, '发现'),
     (Icons.person_outline, Icons.person, '我的'),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // 冷启动：等书架数据加载完成后检查一次
+    _startupTimer = Timer(const Duration(seconds: 2), _autoCheckUpdates);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _startupTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _autoCheckUpdates();
+  }
+
+  /// 定时检查书架更新：仅检查 + 应用内 SnackBar 提示。
+  /// 检查逻辑与书架下拉刷新共用 [UpdateChecker]，基线计数共享。
+  Future<void> _autoCheckUpdates() async {
+    // 每本书的更新开关在 UpdateChecker.check() 内部过滤（默认全开）。
+    final now = DateTime.now();
+    if (_lastAutoCheck != null &&
+        now.difference(_lastAutoCheck!) < const Duration(seconds: 20)) {
+      return;
+    }
+    _lastAutoCheck = now;
+    final n = await UpdateChecker.check();
+    if (n > 0 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$n 本书有更新'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
