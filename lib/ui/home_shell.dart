@@ -46,11 +46,11 @@ class _HomeShellState extends State<HomeShell> {
               ],
             ),
           ),
-          // 底部导航条（Material 3 不透明表面，悬浮覆盖在内容之上）
+          // 底部导航条：贴底固定（SafeArea 内不留空隙），悬浮覆盖在内容之上
           Positioned(
             left: 0,
             right: 0,
-            bottom: 10,
+            bottom: 0,
             child: SafeArea(child: Center(child: _bottomNav())),
           ),
         ],
