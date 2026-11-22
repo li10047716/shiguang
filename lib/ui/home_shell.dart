@@ -46,12 +46,12 @@ class _HomeShellState extends State<HomeShell> {
               ],
             ),
           ),
-          // 底部导航条：贴底固定（SafeArea 内不留空隙），悬浮覆盖在内容之上
+          // 底部通栏固定条：与阅读器控制栏同款——铺满宽度、贴底、纯色背景 + 顶部分隔线
           Positioned(
             left: 0,
             right: 0,
             bottom: 0,
-            child: SafeArea(child: Center(child: _bottomNav())),
+            child: _bottomNav(),
           ),
         ],
       ),
@@ -59,79 +59,56 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Widget _bottomNav() {
-    const double itemW = 56; // 每项宽（图标+文字居中）
+    const double itemW = 72; // 每项宽（图标+文字居中）
     final cs = Theme.of(context).colorScheme;
     final activeColor = cs.primary;
     final inactiveColor = cs.onSurfaceVariant;
-    return NavGlassBar(
-      radius: 28,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      child: Stack(
-        children: [
-          // 宽胶囊滑动指示器：选中高亮为横向拉长的圆角胶囊，包住整项。
-          // 上下各留 2px 空隙不贴到导航条边缘。
-          // AnimatedPositioned 必须直接挂在 Stack 下（ParentDataWidget）。
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 340),
-            curve: Curves.easeOutBack,
-            left: _index * (itemW + 4),
-            top: 2,
-            bottom: 2,
-            width: itemW,
-            child: IgnorePointer(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: cs.secondaryContainer,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-              ),
-            ),
-          ),
-          // 三项按钮（选中高亮由宽胶囊指示器提供）；
-          // 上下 8px 内边距让胶囊比内容更高
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (var i = 0; i < _items.length; i++) ...[
-                  if (i > 0) const SizedBox(width: 4),
-                  InkWell(
-                    borderRadius: BorderRadius.circular(50),
-                    onTap: () => setState(() => _index = i),
-                    child: SizedBox(
-                      width: itemW,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            i == _index ? _items[i].$2 : _items[i].$1,
-                            color: i == _index ? activeColor : inactiveColor,
-                            size: 22,
+    return Container(
+      decoration: BoxDecoration(
+        color: cs.surface,
+        // 顶边细线：区分正文与底部固定栏；完全直角贴底铺满
+        border: Border(top: BorderSide(color: cs.outlineVariant, width: 1)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 7),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (var i = 0; i < _items.length; i++)
+                InkWell(
+                  onTap: () => setState(() => _index = i),
+                  child: SizedBox(
+                    width: itemW,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          i == _index ? _items[i].$2 : _items[i].$1,
+                          color: i == _index ? activeColor : inactiveColor,
+                          size: 22,
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          _items[i].$3,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: i == _index
+                                ? FontWeight.w600
+                                : FontWeight.w400,
+                            color: i == _index
+                                ? activeColor
+                                : inactiveColor,
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _items[i].$3,
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: i == _index
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
-                              color: i == _index
-                                  ? activeColor
-                                  : inactiveColor,
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ],
-            ),
+                ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
