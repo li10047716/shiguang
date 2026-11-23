@@ -18,6 +18,7 @@ import '../../models/book_source.dart';
 import '../../services/chapter_cache.dart';
 import '../../services/library.dart';
 import '../../services/toc_cache.dart';
+import '../../sources/source.dart';
 import '../../sources/builtin/builtin_sources.dart';
 import '../../sources/source_registry.dart';
 import '../app_theme.dart';
@@ -1264,26 +1265,43 @@ class _SourcesPageState extends State<_SourcesPage> {
         .all
         .where((s) => s.sourceId != 'loc' && s.type == ContentType.novel)
         .toList();
-    return ListView(
+    return ReorderableListView(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+      // 关掉系统默认手柄，改用左侧自定义拖动按钮
+      buildDefaultDragHandles: false,
+      onReorderItem: (oldIndex, newIndex) =>
+          _onReorder(sources, oldIndex - 1, newIndex - 1),
       children: [
         const Padding(
+          key: ValueKey('__sources_header__'),
           padding: EdgeInsets.only(bottom: 8),
           child: Text('书源管理',
               style: TextStyle(
                   fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF333333))),
         ),
-        for (final s in sources)
-          Builder(builder: (context) {
+        for (var i = 0; i < sources.length; i++)
+          Builder(key: ValueKey(sources[i].sourceId), builder: (context) {
+            final s = sources[i];
             final rule = repo.byId(s.sourceId);
             final isBuiltin = rule == null;
             final isCustom = !isBuiltin && repo.isCustom(s.sourceId);
             return Padding(
+              key: ValueKey(s.sourceId),
               padding: const EdgeInsets.only(bottom: 6),
               child: FlatCard(
                 radius: 8,
                 child: Row(
                   children: [
+                    // 拖动排序手柄：按住上下拖动调整书源顺序（手机/桌面通用）
+                    ReorderableDragStartListener(
+                      index: i + 1,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 8),
+                        child: Icon(Icons.drag_indicator,
+                            size: 20, color: Colors.grey.shade500),
+                      ),
+                    ),
                     Expanded(
                       child: SwitchListTile(
                         dense: true,
@@ -1324,6 +1342,33 @@ class _SourcesPageState extends State<_SourcesPage> {
           }),
       ],
     );
+  }
+
+  /// 拖拽排序：把显示列表 [shown] 中第 [oldIndex] 项拖到 [newIndex]。
+  /// 显示列表过滤掉了本地源/其它类型，因此要把新顺序映射回完整书源顺序再持久化。
+  Future<void> _onReorder(
+      List<NovelSource> shown, int oldIndex, int newIndex) async {
+    if (oldIndex < 0 || oldIndex >= shown.length) return;
+    // onReorderItem 已自动为「向下拖」调整过 newIndex，无需再减 1。
+    if (newIndex < 0 || newIndex >= shown.length || oldIndex == newIndex) {
+      return;
+    }
+
+    final shownIds = shown.map((s) => s.sourceId).toList();
+    final moved = shownIds.removeAt(oldIndex);
+    shownIds.insert(newIndex, moved);
+
+    // 完整顺序里，只替换「显示中的源」所占的槽位，其它源（本地源等）位置不变
+    final allIds = SourceRegistry().all.map((s) => s.sourceId).toList();
+    final shownSet = shownIds.toSet();
+    var k = 0;
+    for (var i = 0; i < allIds.length; i++) {
+      if (shownSet.contains(allIds[i])) {
+        allIds[i] = shownIds[k++];
+      }
+    }
+    await SourceRegistry().setOrder(allIds);
+    if (mounted) setState(() {});
   }
 
   Future<void> _removeSource(SourceRepository repo, String id) async {

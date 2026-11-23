@@ -24,6 +24,7 @@ class SourceRegistry with ChangeNotifier {
     _loadRuleSources();
     _loadNativeSources();
     _loadHardEnabled();
+    _loadOrder();
   }
 
   static final SourceRegistry _instance = SourceRegistry._();
@@ -32,10 +33,13 @@ class SourceRegistry with ChangeNotifier {
 
   final List<NovelSource> _sources = [];
 
+  /// 书源自定义顺序（sourceId 列表）。为空表示用默认注册顺序。
+  List<String> _order = const [];
+  static const _orderKey = 'source_order';
+
   /// 硬编码源（native/）的禁用集合：sourceId -> 是否禁用。
-  /// 默认启用；书源管理里可开关，持久化到 SharedPreferences。
-  /// ik8（爱看吧）内容风格偏成人，默认关闭，用户自行开启。
-  final Map<String, bool> _hardDisabled = {'ik8': true};
+  /// 默认全部启用（含 ik8 爱看吧）；书源管理里可开关，持久化到 SharedPreferences。
+  final Map<String, bool> _hardDisabled = {};
 
   /// 规则引擎源：从 JSON 书源仓库加载
   void _loadRuleSources() {
@@ -52,7 +56,7 @@ class SourceRegistry with ChangeNotifier {
     _sources.add(BcSource());
     _sources.add(AliSource());
     _sources.add(LocalBookSource());
-    _sources.add(Ik8Source()); // 爱看吧：默认关闭，用户按需开启
+    _sources.add(Ik8Source()); // 爱看吧：默认开启
   }
 
   /// 异步加载硬编码源的启停状态（默认启用，不阻塞启动）
@@ -66,6 +70,52 @@ class SourceRegistry with ChangeNotifier {
         }
       }
     });
+  }
+
+  /// 异步加载自定义书源顺序（不阻塞启动）
+  void _loadOrder() {
+    SharedPreferences.getInstance().then((sp) {
+      final saved = sp.getStringList(_orderKey);
+      if (saved == null || saved.isEmpty) return;
+      _order = saved;
+      _applyOrder();
+      notifyListeners();
+    });
+  }
+
+  /// 按 _order 重排 _sources；未在顺序表里的源保持相对次序排在后面。
+  void _applyOrder() {
+    if (_order.isEmpty) return;
+    final rank = <String, int>{};
+    for (var i = 0; i < _order.length; i++) {
+      rank[_order[i]] = i;
+    }
+    final sorted = <NovelSource>[];
+    final seen = <String>{};
+    for (final id in _order) {
+      for (final s in _sources) {
+        if (s.sourceId == id && !seen.contains(id)) {
+          sorted.add(s);
+          seen.add(id);
+          break;
+        }
+      }
+    }
+    for (final s in _sources) {
+      if (!seen.contains(s.sourceId)) sorted.add(s);
+    }
+    _sources
+      ..clear()
+      ..addAll(sorted);
+  }
+
+  /// 设置书源顺序：[ids] 为排好序的 sourceId 列表，持久化并通知刷新。
+  Future<void> setOrder(List<String> ids) async {
+    _order = List.of(ids);
+    _applyOrder();
+    final sp = await SharedPreferences.getInstance();
+    await sp.setStringList(_orderKey, ids);
+    notifyListeners();
   }
 
   /// 全部书源
@@ -126,5 +176,7 @@ class SourceRegistry with ChangeNotifier {
     _sources.clear();
     _loadRuleSources();
     _loadNativeSources();
+    _applyOrder();
+    notifyListeners();
   }
 }
