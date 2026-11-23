@@ -30,6 +30,8 @@ class _DiscoverPageState extends State<DiscoverPage>
 
   List<NovelSource> _sources = [];
   NovelSource? _source;
+  // 书源排序版本号：只在真正排序变化时递增，发现页据此跟随排最前的源
+  int _sourceOrderVer = 0;
   bool _sectionRank = true; // true=推荐节，false=分类节
   DiscoverTab? _tab;
 
@@ -69,6 +71,7 @@ class _DiscoverPageState extends State<DiscoverPage>
     // 监听书源启停变化：关闭书源后发现页跟着不显示
     SourceRegistry().addListener(_onSourcesChanged);
     _refreshSources();
+    _sourceOrderVer = SourceRegistry().orderVersion;
     if (_sources.isNotEmpty) {
       _source = _sources.first;
       _initSection();
@@ -93,10 +96,30 @@ class _DiscoverPageState extends State<DiscoverPage>
         .toList();
   }
 
-  /// 书源启停变化：刷新源列表；若当前源被禁用则切到第一个可用源。
+  /// 书源启停/排序变化：刷新列表。
+  /// - 排序变化：发现页跟随排在最前的源（用户把某源提前，发现页就显示它）
+  /// - 当前源被禁用：切到第一个可用源
+  /// - 其它情况：仅刷新界面
   void _onSourcesChanged() {
     if (!mounted) return;
+    final oldVer = _sourceOrderVer;
+    final newVer = SourceRegistry().orderVersion;
+    final orderChanged = newVer != oldVer;
+    _sourceOrderVer = newVer;
     _refreshSources();
+
+    // 排序变了：切到排最前的源（即使当前源仍可用）
+    if (orderChanged && _sources.isNotEmpty) {
+      if (_source?.sourceId != _sources.first.sourceId) {
+        setState(() {
+          _source = _sources.first;
+        });
+        _initSection();
+        _load(reset: true);
+        return;
+      }
+    }
+
     if (_source != null && !_sources.contains(_source)) {
       if (_sources.isEmpty) {
         setState(() => _source = null);

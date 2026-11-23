@@ -37,6 +37,10 @@ class SourceRegistry with ChangeNotifier {
   List<String> _order = const [];
   static const _orderKey = 'source_order';
 
+  /// 排序版本号：仅在实际顺序变化时递增，供发现页等监听者判断是否需要跟随第一个源。
+  int _orderVersion = 0;
+  int get orderVersion => _orderVersion;
+
   /// 硬编码源（native/）的禁用集合：sourceId -> 是否禁用。
   /// 默认全部启用（含 ik8 爱看吧）；书源管理里可开关，持久化到 SharedPreferences。
   final Map<String, bool> _hardDisabled = {};
@@ -79,6 +83,7 @@ class SourceRegistry with ChangeNotifier {
       if (saved == null || saved.isEmpty) return;
       _order = saved;
       _applyOrder();
+      _orderVersion++;
       notifyListeners();
     });
   }
@@ -113,6 +118,7 @@ class SourceRegistry with ChangeNotifier {
   Future<void> setOrder(List<String> ids) async {
     _order = List.of(ids);
     _applyOrder();
+    _orderVersion++;
     final sp = await SharedPreferences.getInstance();
     await sp.setStringList(_orderKey, ids);
     notifyListeners();
