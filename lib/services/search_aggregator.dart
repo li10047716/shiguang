@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/book.dart';
+import '../models/book_source.dart';
 import '../sources/source.dart';
 import '../sources/source_registry.dart';
 
@@ -64,12 +65,14 @@ class AggregatedBook {
   final String author;
   final String cover;
   final List<Book> fromSources; // 各来源结果，可换源
+  final ContentType type; // 合并结果的类型（小说/漫画）
 
   AggregatedBook({
     required this.name,
     required this.author,
     required this.cover,
     required this.fromSources,
+    this.type = ContentType.novel,
   });
 
   int get sourceCount => fromSources.length;
@@ -136,6 +139,7 @@ class SearchAggregator extends StateNotifier<AggregateSearchState> {
               author: books.first.author,
               cover: _pickCover(books),
               fromSources: books,
+              type: books.first.type,
             );
           })
           .toList()
@@ -148,7 +152,8 @@ class SearchAggregator extends StateNotifier<AggregateSearchState> {
         final books = await src.search(keyword).timeout(_perSourceTimeout);
         // 增量合并
         for (final b in books) {
-          merged.putIfAbsent(b.normalizeKey, () => []).add(b);
+          // 小说与漫画即使同名也不合并（类型隔离）
+          merged.putIfAbsent('${b.type.name}|${b.normalizeKey}', () => []).add(b);
         }
         patch(i, SourceResult(source: src, state: SourceState.done, books: books));
       } catch (e) {

@@ -26,8 +26,10 @@ class RuleSource extends SourceBase {
   ContentType get type => _source.type;
 
   @override
-  Map<String, String>? get imageHeaders =>
-      {'Referer': '${_source.baseUrl}/'};
+  Map<String, String>? get imageHeaders => {
+    'Referer': '${_source.baseUrl}/',
+    ..._source.headers,
+  };
 
   @override
   Future<List<Book>> search(String keyword, {int page = 1}) =>
@@ -42,14 +44,25 @@ class RuleSource extends SourceBase {
     void Function(int page, int count)? onProgress,
     void Function(int pageIndex, List<Chapter> chapters)? onPageChunk,
   }) =>
-      _executor.loadToc(
-        book,
-        onProgress: onProgress,
-        onPageChunk: onPageChunk,
-      );
+      _executor.loadToc(book, onProgress: onProgress, onPageChunk: onPageChunk);
+
+  @override
+  Future<String?> videoUrl(Chapter chapter) =>
+      _executor.videoUrl(chapter);
 
   @override
   Future<Content> content(Chapter chapter) async {
+    if (_source.type == ContentType.video) {
+      final url = await _executor.videoUrl(chapter);
+      return Content(title: chapter.title, paras: [url]);
+    }
+    if (_source.type == ContentType.comic) {
+      final urls = await _executor.comicContent(chapter);
+      return Content(
+        title: chapter.title,
+        pages: urls.map((url) => ComicPage(url: url)).toList(),
+      );
+    }
     final text = await _executor.content(chapter);
     // 规则源正文是 `<p>`/`<br>` 转成 `\n` 分隔的纯文本，按行拆成段落
     // （原来整章塞一段，翻页/首行缩进错乱）。
@@ -58,10 +71,7 @@ class RuleSource extends SourceBase {
         .map((p) => p.trim())
         .where((p) => p.isNotEmpty)
         .toList();
-    return Content(
-      title: chapter.title,
-      paras: paras.isEmpty ? [text] : paras,
-    );
+    return Content(title: chapter.title, paras: paras.isEmpty ? [text] : paras);
   }
 
   @override

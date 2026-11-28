@@ -12,6 +12,8 @@
 ///   `##正则##替换`     正则后处理；只写 `##正则##` 表示删除匹配部分
 ///   `:contains(文字)`  伪类：按元素文本过滤
 ///   `:not([attr^='x'])`按属性前缀排除
+///   `:has(selector)`   按后代选择器过滤（JSoup 语义）
+///   `:nth-child(n)`    只按 Element 兄弟计数，忽略缩进文本节点
 ///   `@//href/`         兼容写法，等价于 `@href`
 library;
 
@@ -144,6 +146,19 @@ class RuleEngine {
       sel = sel.replaceAll(eqRe, '').trim();
     }
 
+    // :nth-child(n) —— csslib 把文本节点也计入位置，与 JSoup 语义不同。
+    // 改为只按 Element 兄弟节点计数，兼容 Legado 规则。
+    final nthChildRe = RegExp(r':nth-child\((\d+)\)');
+    for (final m in nthChildRe.allMatches(sel)) {
+      final index = int.parse(m.group(1)!) - 1;
+      filters.add((e) {
+        final siblings = e.parentNode?.nodes.whereType<Element>().toList();
+        return siblings != null && index >= 0 && index < siblings.length &&
+            identical(siblings[index], e);
+      });
+    }
+    sel = sel.replaceAll(nthChildRe, '').trim();
+
     // :contains(文字)
     final containsRe = RegExp(r':contains\(([^)]*)\)');
     for (final m in containsRe.allMatches(sel)) {
@@ -160,6 +175,21 @@ class RuleEngine {
       filters.add((e) => !(e.attributes[attr] ?? '').startsWith(val));
     }
     sel = sel.replaceAll(notRe, '').trim();
+
+    // :has(selector) —— package:html 不支持该伪类，改为查询结果后再过滤。
+    final hasRe = RegExp(r':has\(([^)]*)\)');
+    for (final m in hasRe.allMatches(sel)) {
+      final inner = m.group(1)!.trim();
+      if (inner.isEmpty) continue;
+      filters.add((e) {
+        try {
+          return e.querySelector(inner) != null;
+        } catch (_) {
+          return false;
+        }
+      });
+    }
+    sel = sel.replaceAll(hasRe, '').trim();
 
     List<Element> found;
     if (sel.isEmpty) {

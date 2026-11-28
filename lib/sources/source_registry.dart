@@ -12,7 +12,9 @@ import 'builtin/builtin_sources.dart';
 import 'native/ali.dart';
 import 'native/bc.dart';
 import 'native/dq.dart';
+import 'native/guazi.dart';
 import 'native/ik8.dart';
+import 'native/kanman.dart';
 import 'native/localbook.dart';
 import 'native/qm.dart';
 import 'native/shuqi.dart';
@@ -23,8 +25,7 @@ class SourceRegistry with ChangeNotifier {
   SourceRegistry._() {
     _loadRuleSources();
     _loadNativeSources();
-    _loadHardEnabled();
-    _loadOrder();
+    ready = _initialize();
   }
 
   static final SourceRegistry _instance = SourceRegistry._();
@@ -32,6 +33,14 @@ class SourceRegistry with ChangeNotifier {
   factory SourceRegistry() => _instance;
 
   final List<NovelSource> _sources = [];
+  late final Future<void> ready;
+
+  Future<void> _initialize() async {
+    await SourceRepository().ready;
+    await _loadHardEnabled();
+    await _loadOrder();
+    reload();
+  }
 
   /// 书源自定义顺序（sourceId 列表）。为空表示用默认注册顺序。
   List<String> _order = const [];
@@ -61,31 +70,31 @@ class SourceRegistry with ChangeNotifier {
     _sources.add(AliSource());
     _sources.add(LocalBookSource());
     _sources.add(Ik8Source()); // 爱看吧：默认开启
+    _sources.add(KanmanSource()); // 看漫漫画（comic）
+    _sources.add(GuaziSource()); // 瓜子漫画（comic）
   }
 
   /// 异步加载硬编码源的启停状态（默认启用，不阻塞启动）
-  void _loadHardEnabled() {
-    SharedPreferences.getInstance().then((sp) {
-      for (final s in _sources) {
-        if (s.sourceId == 'loc') continue; // 本地源始终启用，不读禁用状态
-        if (SourceRepository().byId(s.sourceId) == null) {
-          final enabled = sp.getBool('source_enabled_${s.sourceId}') ?? true;
-          if (!enabled) _hardDisabled[s.sourceId] = true;
-        }
+  Future<void> _loadHardEnabled() async {
+    final sp = await SharedPreferences.getInstance();
+    for (final s in _sources) {
+      if (s.sourceId == 'loc') continue; // 本地源始终启用，不读禁用状态
+      if (SourceRepository().byId(s.sourceId) == null) {
+        final enabled = sp.getBool('source_enabled_${s.sourceId}') ?? true;
+        if (!enabled) _hardDisabled[s.sourceId] = true;
       }
-    });
+    }
   }
 
   /// 异步加载自定义书源顺序（不阻塞启动）
-  void _loadOrder() {
-    SharedPreferences.getInstance().then((sp) {
-      final saved = sp.getStringList(_orderKey);
-      if (saved == null || saved.isEmpty) return;
-      _order = saved;
-      _applyOrder();
-      _orderVersion++;
-      notifyListeners();
-    });
+  Future<void> _loadOrder() async {
+    final sp = await SharedPreferences.getInstance();
+    final saved = sp.getStringList(_orderKey);
+    if (saved == null || saved.isEmpty) return;
+    _order = saved;
+    _applyOrder();
+    _orderVersion++;
+    notifyListeners();
   }
 
   /// 按 _order 重排 _sources；未在顺序表里的源保持相对次序排在后面。
@@ -116,6 +125,7 @@ class SourceRegistry with ChangeNotifier {
 
   /// 设置书源顺序：[ids] 为排好序的 sourceId 列表，持久化并通知刷新。
   Future<void> setOrder(List<String> ids) async {
+    await ready;
     _order = List.of(ids);
     _applyOrder();
     _orderVersion++;
@@ -147,6 +157,7 @@ class SourceRegistry with ChangeNotifier {
   /// 切换书源启用状态（持久化）。规则源走 SourceRepository，硬编码源走本地 prefs。
   /// 通知监听者（如发现页）刷新启用的书源列表。
   Future<void> toggleEnabled(String sourceId, bool enabled) async {
+    await ready;
     if (SourceRepository().byId(sourceId) != null) {
       await SourceRepository().toggle(sourceId, enabled);
     } else {
@@ -162,8 +173,7 @@ class SourceRegistry with ChangeNotifier {
   }
 
   /// 启用中的全部书源（任意类型）
-  List<NovelSource> get enabled =>
-      _sources.where(_isEnabled).toList();
+  List<NovelSource> get enabled => _sources.where(_isEnabled).toList();
 
   /// 启用中的某类型书源
   List<NovelSource> enabledOfType(ContentType type) =>

@@ -13,6 +13,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../models/book_source.dart';
+import '../source_import.dart';
 
 const String builtinSourcesJson = r'''
 [
@@ -348,7 +349,7 @@ class SourceRepository {
 
   SourceRepository._() {
     _loadBuiltin();
-    _loadPersisted();
+    ready = _loadPersisted();
   }
 
   static final SourceRepository _instance = SourceRepository._();
@@ -356,6 +357,8 @@ class SourceRepository {
   factory SourceRepository() => _instance;
 
   final List<BookSource> _sources = [];
+  late final Future<void> ready;
+  Future<void> _pendingImport = Future.value();
 
   /// 用户导入的自定义源 id（用于区分可删除 / 内置）
   final Set<String> _customIds = {};
@@ -372,108 +375,151 @@ class SourceRepository {
   }
 
   /// 加载持久化的自定义源 + 启停状态（异步合并，不阻塞启动）
-  void _loadPersisted() {
-    SharedPreferences.getInstance().then((sp) {
-      for (final c in sp.getStringList(_customKey) ?? const []) {
-        try {
-          final src = BookSource.fromJson(jsonDecode(c) as Map<String, dynamic>);
-          if (src.id.isEmpty || src.type != ContentType.novel) continue;
-          _sources.removeWhere((s) => s.id == src.id);
-          _sources.add(src);
-          _customIds.add(src.id);
-        } catch (_) {}
-      }
-      for (final d in sp.getStringList(_disabledKey) ?? const []) {
-        final idx = _sources.indexWhere((s) => s.id == d);
-        if (idx != -1) {
-          final s = _sources[idx];
-          _sources[idx] = BookSource(
-            id: s.id,
-            name: s.name,
-            baseUrl: s.baseUrl,
-            type: s.type,
-            enabled: false,
-            search: s.search,
-            detail: s.detail,
-            toc: s.toc,
-            content: s.content,
-          );
+  Future<void> _loadPersisted() async {
+    final sp = await SharedPreferences.getInstance();
+    for (final c in sp.getStringList(_customKey) ?? const []) {
+      try {
+        final src = BookSource.fromJson(jsonDecode(c) as Map<String, dynamic>);
+        if (src.id.isEmpty ||
+            ![
+              ContentType.novel,
+              ContentType.comic,
+              ContentType.video,
+            ].contains(src.type)) {
+          continue;
         }
+        _sources.removeWhere((s) => s.id == src.id);
+        _sources.add(src);
+        _customIds.add(src.id);
+      } catch (_) {}
+    }
+    for (final d in sp.getStringList(_disabledKey) ?? const []) {
+      final idx = _sources.indexWhere((s) => s.id == d);
+      if (idx != -1) {
+        final s = _sources[idx];
+        _sources[idx] = s.copyWith(enabled: false);
       }
-    });
+    }
   }
 
-  /// 当前应用只暴露小说书源；旧漫画/视频源配置不删除，保留在本地数据中。
-  List<BookSource> get all => List.unmodifiable(
-      _sources.where((s) => s.type == ContentType.novel));
+  /// 当前暴露小说、漫画与视频书源。
+  List<BookSource> get all => List.unmodifiable(_sources);
 
   /// 启用中的某类型书源
-  List<BookSource> enabledOfType(ContentType type) => type == ContentType.novel
-      ? _sources.where((s) => s.enabled && s.type == ContentType.novel).toList()
-      : const [];
+  List<BookSource> enabledOfType(ContentType type) =>
+      _sources.where((s) => s.enabled && s.type == type).toList();
 
   /// 按 id 查找
   BookSource? byId(String id) {
     for (final s in _sources) {
-      if (s.id == id && s.type == ContentType.novel) return s;
+      if (s.id == id) return s;
     }
     return null;
   }
 
-  /// 导入书源 JSON（支持数组或单个对象），持久化到 [ _customKey ]。
+  /// 保留旧调用签名及覆盖行为；交互入口使用带报告、显式授权的接口。
   Future<int> importJson(String jsonText) async {
-    final decoded = jsonDecode(jsonText);
-    final list = decoded is List ? decoded : [decoded];
-    var count = 0;
-    final saved = <Map<String, dynamic>>[];
-    for (final raw in list) {
-      try {
-        final item = raw as Map<String, dynamic>;
-        final src = BookSource.fromJson(item);
-        if (src.id.isEmpty || src.type != ContentType.novel) continue;
-        _sources.removeWhere((s) => s.id == src.id); // 覆盖同 id
-        _sources.add(src);
-        _customIds.add(src.id);
-        saved.add(item);
-        count++;
-      } catch (_) {}
-    }
-    if (saved.isNotEmpty) {
+    final report = await importJsonWithReport(jsonText, overwrite: true);
+    return report.added + report.overwritten;
+  }
+
+  Future<SourceImportReport> importJsonWithReport(
+    String jsonText, {
+    bool overwrite = false,
+    Set<String> overwriteIds = const {},
+  }) async {
+    final previous = _pendingImport;
+    final operation = () async {
+      await previous;
+      await ready;
+      final entries = SourceImportAdapter.parse(jsonText);
       final sp = await SharedPreferences.getInstance();
-      final cur = sp.getStringList(_customKey) ?? const [];
-      final merged = [...cur];
-      for (final s in saved) {
-        final id = s['sourceUrl'];
-        merged.removeWhere((e) {
+      final merged = [...?sp.getStringList(_customKey)];
+      final disabled = (sp.getStringList(_disabledKey) ?? const <String>[])
+          .toSet();
+      final accepted = <BookSource>[];
+      final skipped = <String>[];
+      final warnings = <String>[];
+      var added = 0;
+      var overwritten = 0;
+      for (final entry in entries) {
+        if (entry.json == null) {
+          skipped.add('${entry.name}：${entry.reason}');
+          continue;
+        }
+        final exists = byId(entry.id) != null;
+        if (exists && !overwrite && !overwriteIds.contains(entry.id)) {
+          skipped.add('${entry.name}：同 URL 书源已存在，未授权覆盖');
+          continue;
+        }
+        final src = BookSource.fromJson(entry.json!);
+        merged.removeWhere((text) {
           try {
-            return (jsonDecode(e) as Map<String, dynamic>)['sourceUrl'] == id;
+            return (jsonDecode(text) as Map<String, dynamic>)['sourceUrl'] ==
+                src.id;
           } catch (_) {
             return false;
           }
         });
-        merged.add(jsonEncode(s));
+        merged.add(jsonEncode(entry.json));
+        if (src.enabled) {
+          disabled.remove(src.id);
+        } else {
+          disabled.add(src.id);
+        }
+        accepted.add(src);
+        if (exists) {
+          overwritten++;
+        } else {
+          added++;
+        }
+        warnings.addAll(entry.warnings.map((w) => '${entry.name}：$w'));
       }
-      await sp.setStringList(_customKey, merged);
-    }
-    return count;
+      if (accepted.isNotEmpty) {
+        final oldDisabled = sp.getStringList(_disabledKey) ?? const <String>[];
+        if (!await sp.setStringList(_disabledKey, disabled.toList())) {
+          throw StateError('启停状态保存失败，未导入');
+        }
+        try {
+          if (!await sp.setStringList(_customKey, merged)) {
+            throw StateError('书源保存失败');
+          }
+        } catch (_) {
+          await sp.setStringList(_disabledKey, oldDisabled);
+          rethrow;
+        }
+        for (final src in accepted) {
+          final index = _sources.indexWhere((s) => s.id == src.id);
+          if (index < 0) {
+            _sources.add(src);
+          } else {
+            _sources[index] = src;
+          }
+          _customIds.add(src.id);
+        }
+      }
+      return SourceImportReport(
+        added: added,
+        overwritten: overwritten,
+        skipped: skipped,
+        warnings: warnings,
+      );
+    }();
+    _pendingImport = operation.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return operation;
   }
 
   /// 切换启用状态（持久化）
   Future<void> toggle(String id, bool enabled) async {
+    await ready;
+    await _pendingImport;
     final idx = _sources.indexWhere((s) => s.id == id);
     if (idx != -1) {
       final s = _sources[idx];
-      _sources[idx] = BookSource(
-        id: s.id,
-        name: s.name,
-        baseUrl: s.baseUrl,
-        type: s.type,
-        enabled: enabled,
-        search: s.search,
-        detail: s.detail,
-        toc: s.toc,
-        content: s.content,
-      );
+      _sources[idx] = s.copyWith(enabled: enabled);
     }
     final sp = await SharedPreferences.getInstance();
     final disabled = sp.getStringList(_disabledKey) ?? const [];
@@ -484,6 +530,17 @@ class SourceRepository {
       set.add(id);
     }
     await sp.setStringList(_disabledKey, set.toList());
+    if (_customIds.contains(id)) {
+      final saved = sp.getStringList(_customKey) ?? const <String>[];
+      await sp.setStringList(
+        _customKey,
+        saved.map((text) {
+          final json = jsonDecode(text) as Map<String, dynamic>;
+          if (json['sourceUrl'] == id) json['enabled'] = enabled;
+          return jsonEncode(json);
+        }).toList(),
+      );
+    }
   }
 
   /// 是否用户导入的自定义源
@@ -491,18 +548,22 @@ class SourceRepository {
 
   /// 删除自定义书源（内置源不可删）
   Future<void> removeCustom(String id) async {
+    await ready;
+    await _pendingImport;
+    if (!_customIds.contains(id)) return;
     _sources.removeWhere((s) => s.id == id);
     _customIds.remove(id);
     final sp = await SharedPreferences.getInstance();
     final cur = sp.getStringList(_customKey) ?? const [];
     await sp.setStringList(
-        _customKey,
-        cur.where((e) {
-          try {
-            return (jsonDecode(e) as Map<String, dynamic>)['sourceUrl'] != id;
-          } catch (_) {
-            return true;
-          }
-        }).toList());
+      _customKey,
+      cur.where((e) {
+        try {
+          return (jsonDecode(e) as Map<String, dynamic>)['sourceUrl'] != id;
+        } catch (_) {
+          return true;
+        }
+      }).toList(),
+    );
   }
 }

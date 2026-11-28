@@ -41,6 +41,9 @@ abstract class NovelSource {
   /// 小说章节内容（段落文本）
   Future<Content> content(Chapter chapter);
 
+  /// 视频章节的播放地址；非视频源返回 null。
+  Future<String?> videoUrl(Chapter chapter) async => null;
+
   /// 发现页可用标签（空列表 = 该书源不支持发现）。
   List<DiscoverTab> get discoverTabs => const [];
 
@@ -62,6 +65,9 @@ abstract class NovelSource {
 abstract class SourceBase implements NovelSource {
   @override
   Map<String, String>? get imageHeaders => null;
+
+  @override
+  Future<String?> videoUrl(Chapter chapter) async => null;
 
   @override
   List<DiscoverTab> get discoverTabs => const [];

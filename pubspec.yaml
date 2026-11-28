@@ -42,6 +42,9 @@ dependencies:
   path_provider: ^2.1.4   # 应用文档目录（本地书存储）
   file_picker: ^8.1.2     # 选择本地文件导入
   audioplayers: ^6.1.0    # 阅读背景音（白噪音循环）
+  flutter_js: 0.8.7
+  webview_flutter: 4.14.1
+  video_player: 2.14.1
 
 dev_dependencies:
   flutter_test:

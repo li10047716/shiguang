@@ -8,6 +8,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/book.dart';
+import '../../models/book_source.dart';
 import '../../models/discover.dart';
 import '../../services/discover_cache.dart';
 import '../../sources/source.dart';
@@ -480,7 +481,7 @@ class _DiscoverPageState extends State<DiscoverPage>
                 ),
               ),
               const SizedBox(width: 6),
-              const TypeTag(),
+              TypeTag(type: x.type),
             ],
           ),
         ),
@@ -786,14 +787,24 @@ class _DiscoverCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        book.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF222222)),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              book.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF222222)),
+                            ),
+                          ),
+                          if (book.type != ContentType.novel) ...[
+                            const SizedBox(width: 5),
+                            TypeTag(type: book.type),
+                          ],
+                        ],
                       ),
                       const SizedBox(height: 4),
                       Row(

@@ -21,6 +21,8 @@ import '../../services/toc_cache.dart';
 import '../../sources/source.dart';
 import '../../sources/builtin/builtin_sources.dart';
 import '../../sources/source_registry.dart';
+import '../../sources/source_import.dart';
+import '../../sources/source_import_input.dart';
 import '../app_theme.dart';
 import '../book/book_detail_page.dart';
 import '../glass.dart';
@@ -46,8 +48,10 @@ Future<bool> _confirm(BuildContext context, String title, String msg) async {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title,
-                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 10),
             Text(msg),
             const SizedBox(height: 20),
@@ -55,12 +59,14 @@ Future<bool> _confirm(BuildContext context, String title, String msg) async {
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 TextButton(
-                    onPressed: () => Navigator.pop(context, false),
-                    child: const Text('取消')),
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('取消'),
+                ),
                 const SizedBox(width: 8),
                 FilledButton(
-                    onPressed: () => Navigator.pop(context, true),
-                    child: const Text('确定')),
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('确定'),
+                ),
               ],
             ),
           ],
@@ -95,11 +101,17 @@ class _MinePageState extends ConsumerState<MinePage> {
     final sp = await SharedPreferences.getInstance();
     final books = ref.read(libraryProvider);
     final recent = books.where((b) => b.type == ContentType.novel).toList()
-      ..sort((a, b) => (sp.getInt('progress_time_${b.bookUrl}') ?? 0)
-          .compareTo(sp.getInt('progress_time_${a.bookUrl}') ?? 0));
-    final withProgress =
-        recent.where((b) => sp.getInt('progress_time_${b.bookUrl}') != null);
-    final result = (withProgress.isNotEmpty ? withProgress : recent).take(10).toList();
+      ..sort(
+        (a, b) => (sp.getInt('progress_time_${b.bookUrl}') ?? 0).compareTo(
+          sp.getInt('progress_time_${a.bookUrl}') ?? 0,
+        ),
+      );
+    final withProgress = recent.where(
+      (b) => sp.getInt('progress_time_${b.bookUrl}') != null,
+    );
+    final result = (withProgress.isNotEmpty ? withProgress : recent)
+        .take(10)
+        .toList();
     if (!mounted) return;
     setState(() => _recentBooks = result);
   }
@@ -107,22 +119,39 @@ class _MinePageState extends ConsumerState<MinePage> {
   @override
   Widget build(BuildContext context) {
     final content = <(IconData, String, VoidCallback)>[
-      (Icons.download_outlined, '下载管理',
-          () => _push('下载管理', const CacheManagerPage())),
-      (Icons.library_books_outlined, '书源管理',
-          () => _push('书源管理', const _SourcesPage())),
+      (
+        Icons.download_outlined,
+        '下载管理',
+        () => _push('下载管理', const CacheManagerPage()),
+      ),
+      (
+        Icons.library_books_outlined,
+        '书源管理',
+        () => _push('书源管理', const _SourcesPage()),
+      ),
     ];
     final system = <(IconData, String, VoidCallback)>[
-      (Icons.chrome_reader_mode_outlined, '阅读设置',
-          () => _push('阅读设置', const _ReaderSettingsPage())),
-      (Icons.palette_outlined, '主题色',
-          () => _push('主题色', const _ThemeColorPage())),
-      (Icons.cloud_sync_outlined, '备份管理',
-          () => _push('备份管理', const _BackupPage())),
-      (Icons.cleaning_services_outlined, '清除缓存',
-          () => _push('清除缓存', const _ClearCachePage())),
-      (Icons.info_outlined, '关于',
-          () => _push('关于', const _AboutPage())),
+      (
+        Icons.chrome_reader_mode_outlined,
+        '阅读设置',
+        () => _push('阅读设置', const _ReaderSettingsPage()),
+      ),
+      (
+        Icons.palette_outlined,
+        '主题色',
+        () => _push('主题色', const _ThemeColorPage()),
+      ),
+      (
+        Icons.cloud_sync_outlined,
+        '备份管理',
+        () => _push('备份管理', const _BackupPage()),
+      ),
+      (
+        Icons.cleaning_services_outlined,
+        '清除缓存',
+        () => _push('清除缓存', const _ClearCachePage()),
+      ),
+      (Icons.info_outlined, '关于', () => _push('关于', const _AboutPage())),
     ];
 
     return Scaffold(
@@ -148,9 +177,14 @@ class _MinePageState extends ConsumerState<MinePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('最近阅读',
-              style: TextStyle(
-                  fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF222222))),
+          const Text(
+            '最近阅读',
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF222222),
+            ),
+          ),
           const SizedBox(height: 12),
           SizedBox(
             height: 150,
@@ -176,17 +210,29 @@ class _MinePageState extends ConsumerState<MinePage> {
                                   height: 118,
                                   color: Colors.grey.shade200,
                                   alignment: Alignment.center,
-                                  child: const Icon(Icons.menu_book,
-                                      size: 30, color: Colors.grey))
-                              : CoverImage(b.cover,
-                                  sourceId: b.sourceId, width: 92, height: 118),
+                                  child: const Icon(
+                                    Icons.menu_book,
+                                    size: 30,
+                                    color: Colors.grey,
+                                  ),
+                                )
+                              : CoverImage(
+                                  b.cover,
+                                  sourceId: b.sourceId,
+                                  width: 92,
+                                  height: 118,
+                                ),
                         ),
                         const SizedBox(height: 6),
-                        Text(b.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 12, color: Color(0xFF333333))),
+                        Text(
+                          b.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF333333),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -200,16 +246,24 @@ class _MinePageState extends ConsumerState<MinePage> {
   }
 
   /// 分组白色卡片：标题 + 图标宫格（动作型入口直接执行）。
-  Widget _groupCard(String title, List<(IconData, String, VoidCallback)> items) {
+  Widget _groupCard(
+    String title,
+    List<(IconData, String, VoidCallback)> items,
+  ) {
     return FlatCard(
       radius: 16,
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title,
-              style: const TextStyle(
-                  fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF222222))),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF222222),
+            ),
+          ),
           const SizedBox(height: 10),
           LayoutBuilder(
             builder: (context, c) {
@@ -243,11 +297,13 @@ class _MinePageState extends ConsumerState<MinePage> {
           children: [
             Icon(icon, size: 26, color: const Color(0xFF222222)),
             const SizedBox(height: 8),
-            Text(label,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12, color: Color(0xFF333333))),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, color: Color(0xFF333333)),
+            ),
           ],
         ),
       ),
@@ -255,15 +311,16 @@ class _MinePageState extends ConsumerState<MinePage> {
   }
 
   void _openBook(Book b) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => BookDetailPage(book: b)),
-    );
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => BookDetailPage(book: b)));
   }
 
   void _push(String title, Widget page) {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => _SubPage(title: title, child: page),
-    ));
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _SubPage(title: title, child: page),
+      ),
+    );
   }
 
   // ---------- 动作：通用 ----------
@@ -285,15 +342,14 @@ class _BackupRecord {
     required this.path,
   });
 
-  Map<String, dynamic> toJson() =>
-      {'t': time, 'k': kind, 'n': name, 'p': path};
+  Map<String, dynamic> toJson() => {'t': time, 'k': kind, 'n': name, 'p': path};
 
   static _BackupRecord fromJson(Map<String, dynamic> j) => _BackupRecord(
-        time: j['t'] is int ? j['t'] as int : 0,
-        kind: j['k']?.toString() ?? 'quick',
-        name: j['n']?.toString() ?? '',
-        path: j['p']?.toString() ?? '',
-      );
+    time: j['t'] is int ? j['t'] as int : 0,
+    kind: j['k']?.toString() ?? 'quick',
+    name: j['n']?.toString() ?? '',
+    path: j['p']?.toString() ?? '',
+  );
 
   static Future<List<_BackupRecord>> load() async {
     final sp = await SharedPreferences.getInstance();
@@ -302,7 +358,8 @@ class _BackupRecord {
         .map((e) {
           try {
             return _BackupRecord.fromJson(
-                jsonDecode(e) as Map<String, dynamic>);
+              jsonDecode(e) as Map<String, dynamic>,
+            );
           } catch (_) {
             return null;
           }
@@ -315,7 +372,9 @@ class _BackupRecord {
   static Future<void> save(List<_BackupRecord> list) async {
     final sp = await SharedPreferences.getInstance();
     await sp.setStringList(
-        'backup_history', list.map((e) => jsonEncode(e.toJson())).toList());
+      'backup_history',
+      list.map((e) => jsonEncode(e.toJson())).toList(),
+    );
   }
 }
 
@@ -353,12 +412,14 @@ Future<void> _exportBackup(
         'update_notify': sp.getBool('update_notify'),
       };
       data['custom_sources'] = sp.getStringList('custom_sources') ?? const [];
-      data['disabled_sources'] = sp.getStringList('disabled_sources') ?? const [];
+      data['disabled_sources'] =
+          sp.getStringList('disabled_sources') ?? const [];
     }
     final kindName = full ? '完整备份' : '快速备份';
     final path = await FilePicker.platform.saveFile(
       dialogTitle: kindName,
-      fileName: '悦读${full ? '完整' : '快速'}备份_${DateTime.now().millisecondsSinceEpoch}.json',
+      fileName:
+          '悦读${full ? '完整' : '快速'}备份_${DateTime.now().millisecondsSinceEpoch}.json',
       type: FileType.custom,
       allowedExtensions: ['json'],
     );
@@ -409,7 +470,9 @@ Future<void> _importBackup(
     final data = jsonDecode(utf8.decode(f.bytes!)) as Map<String, dynamic>;
     final sp = await SharedPreferences.getInstance();
     await sp.setStringList(
-        'shelf_books', (data['shelf'] as List<dynamic>? ?? []).cast<String>());
+      'shelf_books',
+      (data['shelf'] as List<dynamic>? ?? []).cast<String>(),
+    );
     final progress = data['progress'] as Map<String, dynamic>? ?? {};
     for (final e in progress.entries) {
       final v = e.value;
@@ -439,8 +502,7 @@ Future<void> _importBackup(
     await reload();
     if (context.mounted) {
       messenger.showSnackBar(
-        const SnackBar(
-            content: Text('备份已恢复'), duration: Duration(seconds: 1)),
+        const SnackBar(content: Text('备份已恢复'), duration: Duration(seconds: 1)),
       );
     }
   } catch (e) {
@@ -479,7 +541,8 @@ class _BackupPageState extends ConsumerState<_BackupPage> {
   }
 
   Future<void> _deleteRecord(_BackupRecord r) async {
-    final list = await _BackupRecord.load()..removeWhere((e) => e.time == r.time);
+    final list = await _BackupRecord.load()
+      ..removeWhere((e) => e.time == r.time);
     await _BackupRecord.save(list);
     _load();
   }
@@ -512,25 +575,24 @@ class _BackupPageState extends ConsumerState<_BackupPage> {
             children: [
               Padding(
                 padding: const EdgeInsets.only(top: 10, bottom: 6),
-                child: Text('备份操作',
-                    style: TextStyle(
-                        fontSize: 13, color: Colors.grey.shade500)),
+                child: Text(
+                  '备份操作',
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+                ),
               ),
               _actionRow(
                 icon: Icons.cloud_upload_outlined,
                 color: const Color(0xFF3D8AF7),
                 label: '完整备份',
                 sub: '书架 + 进度 + 设置 + 书源',
-                onTap: () => _exportBackup(context,
-                    full: true, onDone: _load),
+                onTap: () => _exportBackup(context, full: true, onDone: _load),
               ),
               _actionRow(
                 icon: Icons.bolt_outlined,
                 color: const Color(0xFF3D8AF7),
                 label: '快速备份',
                 sub: '书架 + 阅读进度',
-                onTap: () => _exportBackup(context,
-                    full: false, onDone: _load),
+                onTap: () => _exportBackup(context, full: false, onDone: _load),
               ),
               _actionRow(
                 icon: Icons.restore_outlined,
@@ -556,16 +618,24 @@ class _BackupPageState extends ConsumerState<_BackupPage> {
               Row(
                 children: [
                   Expanded(
-                    child: Text('备份历史',
-                        style: TextStyle(
-                            fontSize: 13, color: Colors.grey.shade500)),
+                    child: Text(
+                      '备份历史',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
                   ),
                   if (_records.isNotEmpty)
                     GestureDetector(
                       onTap: _clearHistory,
-                      child: Text('清空',
-                          style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade500)),
+                      child: Text(
+                        '清空',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade500,
+                        ),
+                      ),
                     ),
                 ],
               ),
@@ -575,16 +645,27 @@ class _BackupPageState extends ConsumerState<_BackupPage> {
                   padding: const EdgeInsets.symmetric(vertical: 24),
                   child: Column(
                     children: [
-                      Icon(Icons.history_outlined,
-                          size: 44, color: Colors.grey.shade300),
+                      Icon(
+                        Icons.history_outlined,
+                        size: 44,
+                        color: Colors.grey.shade300,
+                      ),
                       const SizedBox(height: 12),
-                      Text('暂无备份历史',
-                          style: TextStyle(
-                              fontSize: 14, color: Colors.grey.shade500)),
+                      Text(
+                        '暂无备份历史',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey.shade500,
+                        ),
+                      ),
                       const SizedBox(height: 6),
-                      Text('点击「快速备份」开始创建备份',
-                          style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade400)),
+                      Text(
+                        '点击「快速备份」开始创建备份',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade400,
+                        ),
+                      ),
                     ],
                   ),
                 )
@@ -606,26 +687,33 @@ class _BackupPageState extends ConsumerState<_BackupPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(r.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                      fontSize: 13,
-                                      color: Color(0xFF333333))),
+                              Text(
+                                r.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: Color(0xFF333333),
+                                ),
+                              ),
                               const SizedBox(height: 2),
                               Text(
                                 '${_fmtTime(r.time)} · ${r.kind == 'full' ? '完整备份' : '快速备份'}',
                                 style: TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.grey.shade500),
+                                  fontSize: 11,
+                                  color: Colors.grey.shade500,
+                                ),
                               ),
                             ],
                           ),
                         ),
                         IconButton(
                           tooltip: '删除记录',
-                          icon: Icon(Icons.close,
-                              size: 16, color: Colors.grey.shade400),
+                          icon: Icon(
+                            Icons.close,
+                            size: 16,
+                            color: Colors.grey.shade400,
+                          ),
                           onPressed: () => _deleteRecord(r),
                         ),
                       ],
@@ -658,15 +746,19 @@ class _BackupPageState extends ConsumerState<_BackupPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(label,
-                      style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF222222))),
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF222222),
+                    ),
+                  ),
                   const SizedBox(height: 2),
-                  Text(sub,
-                      style: TextStyle(
-                          fontSize: 11, color: Colors.grey.shade500)),
+                  Text(
+                    sub,
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                  ),
                 ],
               ),
             ),
@@ -813,22 +905,29 @@ class _ClearCachePageState extends State<_ClearCachePage> {
                   color: Colors.grey.shade100,
                   borderRadius: BorderRadius.circular(14),
                 ),
-                child: Icon(Icons.storage_outlined,
-                    size: 26, color: Colors.grey.shade700),
+                child: Icon(
+                  Icons.storage_outlined,
+                  size: 26,
+                  color: Colors.grey.shade700,
+                ),
               ),
               const SizedBox(width: 14),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('总缓存大小',
-                      style: TextStyle(
-                          fontSize: 13, color: Colors.grey.shade600)),
+                  Text(
+                    '总缓存大小',
+                    style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                  ),
                   const SizedBox(height: 4),
-                  Text(_fmt(total),
-                      style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF222222))),
+                  Text(
+                    _fmt(total),
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF222222),
+                    ),
+                  ),
                 ],
               ),
             ],
@@ -840,14 +939,20 @@ class _ClearCachePageState extends State<_ClearCachePage> {
           padding: const EdgeInsets.only(left: 4, bottom: 10),
           child: Row(
             children: [
-              Icon(Icons.cleaning_services_outlined,
-                  size: 16, color: const Color(0xFF3D8AF7)),
+              Icon(
+                Icons.cleaning_services_outlined,
+                size: 16,
+                color: const Color(0xFF3D8AF7),
+              ),
               const SizedBox(width: 6),
-              Text('缓存清理',
-                  style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF222222))),
+              Text(
+                '缓存清理',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF222222),
+                ),
+              ),
             ],
           ),
         ),
@@ -929,30 +1034,42 @@ class _ClearCachePageState extends State<_ClearCachePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(label,
-                        style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF222222))),
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF222222),
+                      ),
+                    ),
                     const SizedBox(height: 2),
-                    Text(sub,
-                        style: TextStyle(
-                            fontSize: 12, color: Colors.grey.shade500)),
+                    Text(
+                      sub,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
                   ],
                 ),
               ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: bg,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Text(chip,
-                    style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: chipColor)),
+                child: Text(
+                  chip,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: chipColor,
+                  ),
+                ),
               ),
             ],
           ),
@@ -1001,13 +1118,18 @@ class _AboutPageState extends State<_AboutPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title,
-                  style: const TextStyle(
-                      fontSize: 17, fontWeight: FontWeight.w700)),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               const SizedBox(height: 12),
-              Text(body,
-                  style:
-                      TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+              Text(
+                body,
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+              ),
               const SizedBox(height: 16),
               Align(
                 alignment: Alignment.centerRight,
@@ -1049,12 +1171,15 @@ class _AboutPageState extends State<_AboutPage> {
               child: Icon(Icons.menu_book, size: 40, color: _accent),
             ),
             const SizedBox(height: 14),
-            const Text('悦读',
-                style: TextStyle(
-                    fontSize: 20, fontWeight: FontWeight.w800)),
+            const Text(
+              '悦读',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+            ),
             const SizedBox(height: 4),
-            Text('版本 1.0.0',
-                style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
+            Text(
+              '版本 1.0.0',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+            ),
           ],
         ),
         const SizedBox(height: 28),
@@ -1064,17 +1189,32 @@ class _AboutPageState extends State<_AboutPage> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           child: Column(
             children: [
-              _aboutRow('用户协议',
-                  onTap: () => _showDoc('用户协议', '本应用仅供学习与个人阅读使用，'
-                      '书籍内容均来自网络公开书源，请支持正版。继续使用即视为同意本协议。')),
+              _aboutRow(
+                '用户协议',
+                onTap: () => _showDoc(
+                  '用户协议',
+                  '本应用仅供学习与个人阅读使用，'
+                      '书籍内容均来自网络公开书源，请支持正版。继续使用即视为同意本协议。',
+                ),
+              ),
               _divider(),
-              _aboutRow('隐私声明',
-                  onTap: () => _showDoc('隐私声明', '本应用不收集、上传任何个人数据；'
-                      '书架、进度、缓存均保存在本地设备。')),
+              _aboutRow(
+                '隐私声明',
+                onTap: () => _showDoc(
+                  '隐私声明',
+                  '本应用不收集、上传任何个人数据；'
+                      '书架、进度、缓存均保存在本地设备。',
+                ),
+              ),
               _divider(),
-              _aboutRow('免责声明',
-                  onTap: () => _showDoc('免责声明', '本应用不存储任何书籍内容，'
-                      '所有内容均来自用户添加的书源站点，内容的准确性、合法性由来源站点负责。')),
+              _aboutRow(
+                '免责声明',
+                onTap: () => _showDoc(
+                  '免责声明',
+                  '本应用不存储任何书籍内容，'
+                      '所有内容均来自用户添加的书源站点，内容的准确性、合法性由来源站点负责。',
+                ),
+              ),
               _divider(),
               _aboutRow('错误日志', onTap: () => _tip('暂无错误日志')),
               _divider(),
@@ -1084,9 +1224,10 @@ class _AboutPageState extends State<_AboutPage> {
                 activeTrackColor: _accent,
                 thumbColor: const WidgetStatePropertyAll(Colors.white),
                 contentPadding: EdgeInsets.zero,
-                title: const Text('更新提醒',
-                    style: TextStyle(
-                        fontSize: 15, color: Color(0xFF333333))),
+                title: const Text(
+                  '更新提醒',
+                  style: TextStyle(fontSize: 15, color: Color(0xFF333333)),
+                ),
               ),
               _divider(),
               _aboutRow('检查更新', onTap: () => _tip('当前已是最新版本')),
@@ -1107,9 +1248,10 @@ class _AboutPageState extends State<_AboutPage> {
         child: Row(
           children: [
             Expanded(
-              child: Text(label,
-                  style: const TextStyle(
-                      fontSize: 15, color: Color(0xFF333333))),
+              child: Text(
+                label,
+                style: const TextStyle(fontSize: 15, color: Color(0xFF333333)),
+              ),
             ),
             Icon(Icons.chevron_right, size: 20, color: Colors.grey.shade400),
           ],
@@ -1146,9 +1288,13 @@ class _SubPage extends StatelessWidget {
                         onPressed: () => Navigator.of(context).pop(),
                       ),
                       const SizedBox(width: 4),
-                      Text(title,
-                          style: const TextStyle(
-                              fontSize: 17, fontWeight: FontWeight.w700)),
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1181,14 +1327,19 @@ class _ThemeColorPage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('应用主题色',
-                      style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF555555))),
+                  const Text(
+                    '应用主题色',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF555555),
+                    ),
+                  ),
                   const SizedBox(height: 8),
-                  const Text('作用于整个应用（导航、按钮、刷新圈等），与阅读界面的背景设置相互独立。',
-                      style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  const Text(
+                    '作用于整个应用（导航、按钮、刷新圈等），与阅读界面的背景设置相互独立。',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
                   const SizedBox(height: 14),
                   Wrap(
                     spacing: 12,
@@ -1230,7 +1381,12 @@ class _ThemeColorPage extends StatelessWidget {
                 width: 2,
               ),
               boxShadow: selected
-                  ? [BoxShadow(color: color.withValues(alpha: 0.4), blurRadius: 8)]
+                  ? [
+                      BoxShadow(
+                        color: color.withValues(alpha: 0.4),
+                        blurRadius: 8,
+                      ),
+                    ]
                   : null,
             ),
             child: selected
@@ -1238,10 +1394,13 @@ class _ThemeColorPage extends StatelessWidget {
                 : null,
           ),
           const SizedBox(height: 6),
-          Text(AppTheme.accentNames[i],
-              style: TextStyle(
-                  fontSize: 12,
-                  color: selected ? const Color(0xFF222222) : Colors.grey)),
+          Text(
+            AppTheme.accentNames[i],
+            style: TextStyle(
+              fontSize: 12,
+              color: selected ? const Color(0xFF222222) : Colors.grey,
+            ),
+          ),
         ],
       ),
     );
@@ -1258,88 +1417,311 @@ class _SourcesPage extends StatefulWidget {
 }
 
 class _SourcesPageState extends State<_SourcesPage> {
+  bool _importing = false;
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    SourceRegistry().addListener(_refreshSources);
+    _loadSources();
+  }
+
+  Future<void> _loadSources() async {
+    await SourceRegistry().ready;
+    if (mounted) setState(() => _ready = true);
+  }
+
+  void _refreshSources() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    SourceRegistry().removeListener(_refreshSources);
+    super.dispose();
+  }
+
+  Future<String?> _importText(bool url) async {
+    var input = '';
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(url ? '从 URL 下载书源' : '粘贴书源 JSON / JS'),
+        content: SizedBox(
+          width: 520,
+          child: TextField(
+            onChanged: (value) => input = value,
+            autofocus: true,
+            minLines: url ? 1 : 6,
+            maxLines: url ? 3 : 12,
+            keyboardType: url ? TextInputType.url : TextInputType.multiline,
+            decoration: InputDecoration(
+              hintText: url ? 'HTTP(S) JSON / JS 地址' : 'JSON 书源、书源数组或 JS 单文件源码',
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, input),
+            child: const Text('解析'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool> _importReport(
+    String title,
+    String text, {
+    bool confirm = false,
+  }) async {
+    if (!mounted) return false;
+    return await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(title),
+            content: SizedBox(
+              width: 560,
+              child: SingleChildScrollView(child: SelectableText(text)),
+            ),
+            actions: [
+              if (confirm)
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('取消'),
+                ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(confirm ? '确认导入并覆盖以上同 URL 书源' : '关闭'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> _importSources(String kind) async {
+    if (_importing) return;
+    setState(() => _importing = true);
+    try {
+      String? text;
+      if (kind == 'file') {
+        final picked = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: ['json', 'js', 'txt'],
+        );
+        final file = picked?.files.firstOrNull;
+        if (file == null) return;
+        if (file.path == null) throw const FormatException('无法取得所选文件路径');
+        text = await SourceImportInput.readFile(file.path!);
+      } else {
+        final input = await _importText(kind == 'url');
+        if (input == null) return;
+        text = kind == 'url' ? await SourceImportInput.download(input) : input;
+      }
+      if (utf8.encode(text).length > SourceImportInput.maxBytes) {
+        throw const FormatException('JSON 数据不能超过 5 MiB');
+      }
+      final entries = SourceImportAdapter.parse(text);
+      final repo = SourceRepository();
+      await repo.ready;
+      if (!mounted) return;
+      final overwriteIds = <String>{};
+      var added = 0;
+      var skipped = 0;
+      final lines = <String>[];
+      for (final entry in entries) {
+        if (entry.json == null) {
+          skipped++;
+          lines.add('跳过 ${entry.name}：${entry.reason}');
+        } else {
+          final existing = repo.byId(entry.id);
+          if (existing != null) {
+            overwriteIds.add(entry.id);
+            lines.add('覆盖 ${existing.name} → ${entry.name}（${entry.id}）');
+          } else {
+            added++;
+            lines.add('新增 ${entry.name}（${entry.id}）');
+          }
+          lines.addAll(entry.warnings.map((w) => '提示：$w'));
+        }
+      }
+      final preview =
+          '预计新增 $added，覆盖 ${overwriteIds.length}，跳过 $skipped。\n'
+          '支持标准规则、JS 增强、JS 单文件与 WebView 规则，以及小说/漫画/视频书源；'
+          'JS 与 WebView 源依赖站点脚本，通过检查不代表联网可用。\n\n${lines.join('\n')}';
+      if (added + overwriteIds.length == 0) {
+        await _importReport('没有可导入书源', preview);
+        return;
+      }
+      if (!await _importReport('导入确认（同 URL 将被覆盖）', preview, confirm: true)) {
+        return;
+      }
+      final report = await repo.importJsonWithReport(
+        text,
+        overwriteIds: overwriteIds,
+      );
+      SourceRegistry().reload();
+      await _importReport('导入结果', report.summary);
+    } catch (e) {
+      await _importReport('导入失败', e.toString());
+    } finally {
+      if (mounted) setState(() => _importing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final repo = SourceRepository();
-    final sources = SourceRegistry()
-        .all
-        .where((s) => s.sourceId != 'loc' && s.type == ContentType.novel)
+    final sources = SourceRegistry().all
+        .where(
+              (s) =>
+              s.sourceId != 'loc' &&
+              [
+                ContentType.novel,
+                ContentType.comic,
+                ContentType.video,
+              ].contains(s.type),
+        )
         .toList();
-    return ReorderableListView(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
-      // 关掉系统默认手柄，改用左侧自定义拖动按钮
-      buildDefaultDragHandles: false,
-      onReorderItem: (oldIndex, newIndex) =>
-          _onReorder(sources, oldIndex - 1, newIndex - 1),
+    if (!_ready) return const Center(child: CircularProgressIndicator());
+    return Column(
       children: [
-        const Padding(
-          key: ValueKey('__sources_header__'),
-          padding: EdgeInsets.only(bottom: 8),
-          child: Text('书源管理',
-              style: TextStyle(
-                  fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF333333))),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              for (final item in [
+                ('file', '文件 JSON/JS'),
+                ('url', 'URL 下载'),
+                ('paste', '粘贴 JSON/JS'),
+              ])
+                OutlinedButton.icon(
+                  onPressed: _importing ? null : () => _importSources(item.$1),
+                  icon: const Icon(Icons.file_download_outlined),
+                  label: Text(item.$2),
+                ),
+              if (_importing)
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+            ],
+          ),
         ),
-        for (var i = 0; i < sources.length; i++)
-          Builder(key: ValueKey(sources[i].sourceId), builder: (context) {
-            final s = sources[i];
-            final rule = repo.byId(s.sourceId);
-            final isBuiltin = rule == null;
-            final isCustom = !isBuiltin && repo.isCustom(s.sourceId);
-            return Padding(
-              key: ValueKey(s.sourceId),
-              padding: const EdgeInsets.only(bottom: 6),
-              child: FlatCard(
-                radius: 8,
-                child: Row(
-                  children: [
-                    // 拖动排序手柄：按住上下拖动调整书源顺序（手机/桌面通用）
-                    ReorderableDragStartListener(
-                      index: i + 1,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 8),
-                        child: Icon(Icons.drag_indicator,
-                            size: 20, color: Colors.grey.shade500),
-                      ),
-                    ),
-                    Expanded(
-                      child: SwitchListTile(
-                        dense: true,
-                        activeThumbColor: _accent,
-                        title: Row(
-                          children: [
-                            Flexible(
-                              child: Text(s.sourceName,
-                                  maxLines: 1, overflow: TextOverflow.ellipsis),
-                            ),
-                            const SizedBox(width: 8),
-                            const TypeTag(),
-                          ],
-                        ),
-                        subtitle: Text(
-                          isBuiltin ? '内置书源（可启停）' : rule.baseUrl,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        value: SourceRegistry().isEnabled(s.sourceId),
-                        onChanged: (v) async {
-                          await SourceRegistry().toggleEnabled(s.sourceId, v);
-                          setState(() {});
-                        },
-                      ),
-                    ),
-                    if (isCustom)
-                      IconButton(
-                        tooltip: '删除书源',
-                        icon: const Icon(Icons.delete_outline,
-                            size: 18, color: Color(0xFFE5484D)),
-                        onPressed: () => _removeSource(repo, s.sourceId),
-                      ),
-                  ],
+        Expanded(
+          child: ReorderableListView(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+            // 关掉系统默认手柄，改用左侧自定义拖动按钮
+            buildDefaultDragHandles: false,
+            onReorderItem: (oldIndex, newIndex) =>
+                _onReorder(sources, oldIndex - 1, newIndex - 1),
+            children: [
+              const Padding(
+                key: ValueKey('__sources_header__'),
+                padding: EdgeInsets.only(bottom: 8),
+                child: Text(
+                  '书源管理',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF333333),
+                  ),
                 ),
               ),
-            );
-          }),
+              for (var i = 0; i < sources.length; i++)
+                Builder(
+                  key: ValueKey(sources[i].sourceId),
+                  builder: (context) {
+                    final s = sources[i];
+                    final rule = repo.byId(s.sourceId);
+                    final isBuiltin = rule == null;
+                    final isCustom = !isBuiltin && repo.isCustom(s.sourceId);
+                    return Padding(
+                      key: ValueKey(s.sourceId),
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: FlatCard(
+                        radius: 8,
+                        child: Row(
+                          children: [
+                            // 拖动排序手柄：按住上下拖动调整书源顺序（手机/桌面通用）
+                            ReorderableDragStartListener(
+                              index: i + 1,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                child: Icon(
+                                  Icons.drag_indicator,
+                                  size: 20,
+                                  color: Colors.grey.shade500,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Material(
+                                color: Colors.transparent,
+                                child: SwitchListTile(
+                                  dense: true,
+                                  activeThumbColor: _accent,
+                                  title: Row(
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          s.sourceName,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      TypeTag(type: s.type),
+                                    ],
+                                  ),
+                                  subtitle: Text(
+                                    isBuiltin ? '内置书源（可启停）' : rule.baseUrl,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  value: SourceRegistry().isEnabled(s.sourceId),
+                                  onChanged: (v) async {
+                                    await SourceRegistry().toggleEnabled(
+                                      s.sourceId,
+                                      v,
+                                    );
+                                    setState(() {});
+                                  },
+                                ),
+                              ),
+                            ),
+                            if (isCustom)
+                              IconButton(
+                                tooltip: '删除书源',
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  size: 18,
+                                  color: Color(0xFFE5484D),
+                                ),
+                                onPressed: () =>
+                                    _removeSource(repo, s.sourceId),
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -1347,7 +1729,10 @@ class _SourcesPageState extends State<_SourcesPage> {
   /// 拖拽排序：把显示列表 [shown] 中第 [oldIndex] 项拖到 [newIndex]。
   /// 显示列表过滤掉了本地源/其它类型，因此要把新顺序映射回完整书源顺序再持久化。
   Future<void> _onReorder(
-      List<NovelSource> shown, int oldIndex, int newIndex) async {
+    List<NovelSource> shown,
+    int oldIndex,
+    int newIndex,
+  ) async {
     if (oldIndex < 0 || oldIndex >= shown.length) return;
     // onReorderItem 已自动为「向下拖」调整过 newIndex，无需再减 1。
     if (newIndex < 0 || newIndex >= shown.length || oldIndex == newIndex) {
@@ -1428,11 +1813,14 @@ class _ReaderSettingsPageState extends State<_ReaderSettingsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title,
-              style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF555555))),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF555555),
+            ),
+          ),
           const SizedBox(height: 8),
           child,
         ],
@@ -1440,28 +1828,37 @@ class _ReaderSettingsPageState extends State<_ReaderSettingsPage> {
     );
   }
 
-  Widget _sliderCard(String title, double value, double min, double max,
-      String label, ValueChanged<double> onChanged) {
+  Widget _sliderCard(
+    String title,
+    double value,
+    double min,
+    double max,
+    String label,
+    ValueChanged<double> onChanged,
+  ) {
     return _card(
-        title,
-        Row(
-          children: [
-            Expanded(
-              child: Slider(
-                value: value.clamp(min, max),
-                min: min,
-                max: max,
-                onChanged: onChanged,
-              ),
+      title,
+      Row(
+        children: [
+          Expanded(
+            child: Slider(
+              value: value.clamp(min, max),
+              min: min,
+              max: max,
+              onChanged: onChanged,
             ),
-            SizedBox(
-              width: 44,
-              child: Text(label,
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(fontSize: 13, color: Colors.grey)),
+          ),
+          SizedBox(
+            width: 44,
+            child: Text(
+              label,
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontSize: 13, color: Colors.grey),
             ),
-          ],
-        ));
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -1489,63 +1886,69 @@ class _ReaderSettingsPageState extends State<_ReaderSettingsPage> {
         }),
         const SizedBox(height: 12),
         _card(
-            '阅读背景',
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (var i = 0; i < ReaderPrefs.bgNames.length; i++)
-                  ChoiceChip(
-                    label: Text(ReaderPrefs.bgNames[i]),
-                    selected: _bg == i,
-                    onSelected: (_) async {
-                      setState(() => _bg = i);
-                      final sp = await SharedPreferences.getInstance();
-                      await sp.setInt('reader_bg', i);
-                    },
-                  ),
-              ],
-            )),
+          '阅读背景',
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (var i = 0; i < ReaderPrefs.bgNames.length; i++)
+                ChoiceChip(
+                  label: Text(ReaderPrefs.bgNames[i]),
+                  selected: _bg == i,
+                  onSelected: (_) async {
+                    setState(() => _bg = i);
+                    final sp = await SharedPreferences.getInstance();
+                    await sp.setInt('reader_bg', i);
+                  },
+                ),
+            ],
+          ),
+        ),
         const SizedBox(height: 12),
-        _sliderCard('亮度', _bright, 0.3, 1.0, '${(_bright * 100).round()}%',
-            (v) async {
+        _sliderCard('亮度', _bright, 0.3, 1.0, '${(_bright * 100).round()}%', (
+          v,
+        ) async {
           setState(() => _bright = v);
           final sp = await SharedPreferences.getInstance();
           await sp.setDouble('reader_brightness', v);
         }),
         const SizedBox(height: 12),
         _card(
-            '翻页效果',
-            Wrap(
-              spacing: 8,
-              children: [
-                for (var i = 0; i < ReaderPrefs.turnNames.length; i++)
-                  ChoiceChip(
-                    label: Text(ReaderPrefs.turnNames[i]),
-                    selected: _turn == i,
-                    onSelected: (_) async {
-                      setState(() => _turn = i);
-                      final sp = await SharedPreferences.getInstance();
-                      await sp.setInt('reader_turn_mode', i);
-                    },
-                  ),
-              ],
-            )),
+          '翻页效果',
+          Wrap(
+            spacing: 8,
+            children: [
+              for (var i = 0; i < ReaderPrefs.turnNames.length; i++)
+                ChoiceChip(
+                  label: Text(ReaderPrefs.turnNames[i]),
+                  selected: _turn == i,
+                  onSelected: (_) async {
+                    setState(() => _turn = i);
+                    final sp = await SharedPreferences.getInstance();
+                    await sp.setInt('reader_turn_mode', i);
+                  },
+                ),
+            ],
+          ),
+        ),
         const SizedBox(height: 12),
         _card(
-            '夜间自动切换',
-            SwitchListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              title: const Text('21:00 - 7:00 自动夜间主题',
-                  style: TextStyle(fontSize: 13)),
-              value: _autoNight,
-              onChanged: (v) async {
-                setState(() => _autoNight = v);
-                final sp = await SharedPreferences.getInstance();
-                await sp.setBool('reader_auto_night', v);
-              },
-            )),
+          '夜间自动切换',
+          SwitchListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            title: const Text(
+              '21:00 - 7:00 自动夜间主题',
+              style: TextStyle(fontSize: 13),
+            ),
+            value: _autoNight,
+            onChanged: (v) async {
+              setState(() => _autoNight = v);
+              final sp = await SharedPreferences.getInstance();
+              await sp.setBool('reader_auto_night', v);
+            },
+          ),
+        ),
       ],
     );
   }

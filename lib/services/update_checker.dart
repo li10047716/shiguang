@@ -36,7 +36,13 @@ class UpdateChecker {
     final target = books ?? _loadBooks(sp);
     var updated = 0;
     for (final b in target) {
-      if (b.type != ContentType.novel) continue;
+      if (![
+        ContentType.novel,
+        ContentType.comic,
+        ContentType.video,
+      ].contains(b.type)) {
+        continue;
+      }
       // 单本书关闭了更新开关则跳过（默认开启，只有显式 false 才跳过）
       if (sp.getBool('$_autoPrefix${b.bookUrl}') == false) continue;
       final source = SourceRegistry().byId(b.sourceId);

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'ui/app_theme.dart';
 import 'ui/home_shell.dart';
+import 'utils/app_navigator.dart';
 
 /// 全局 UI 字体：Windows 用微软雅黑，移动端（iOS/Android）用系统默认
 /// （iOS 无微软雅黑，指定会回退；让系统字体现成）。
@@ -67,6 +68,7 @@ class ReadingApp extends StatelessWidget {
             fontFamily: _uiFont(),
           );
           return MaterialApp(
+            navigatorKey: AppNavigator.key,
             title: '悦读',
             debugShowCheckedModeBanner: false,
             themeMode: AppTheme.themeMode,

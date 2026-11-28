@@ -50,6 +50,8 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
   List<String> _groups = [];
   Map<String, String> _groupOf = {};
   String? _groupFilter;
+  // 类型过滤：null=全部；ContentType.novel/comic 单独筛
+  ContentType? _typeFilter;
 
   // ---------- 书架管理模式（书架页内操作，不跳转独立页面） ----------
   bool _manageMode = false;
@@ -1056,11 +1058,31 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
               items: [
                 GlassMenuItem(
                   label: '全部',
-                  selected: _groupFilter == null,
-                  onTap: () => setState(() => _groupFilter = null),
+                  selected: _typeFilter == null && _groupFilter == null,
+                  onTap: () => setState(() {
+                    _typeFilter = null;
+                    _groupFilter = null;
+                  }),
                 ),
-                if (_groups.isNotEmpty)
-                  const GlassMenuItem(label: '', divider: true),
+                GlassMenuItem(
+                  label: '小说',
+                  leadingIcon: Icons.menu_book_outlined,
+                  selected: _typeFilter == ContentType.novel,
+                  onTap: () => setState(() => _typeFilter = ContentType.novel),
+                ),
+                GlassMenuItem(
+                  label: '漫画',
+                  leadingIcon: Icons.auto_stories_outlined,
+                  selected: _typeFilter == ContentType.comic,
+                  onTap: () => setState(() => _typeFilter = ContentType.comic),
+                ),
+                GlassMenuItem(
+                  label: '视频',
+                  leadingIcon: Icons.play_circle_outline,
+                  selected: _typeFilter == ContentType.video,
+                  onTap: () => setState(() => _typeFilter = ContentType.video),
+                ),
+                const GlassMenuItem(label: '', divider: true),
                 for (final g in _groups)
                   GlassMenuItem(
                     label: g,
@@ -1081,7 +1103,14 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      _groupFilter ?? '全部',
+                      _groupFilter ??
+                          (_typeFilter == ContentType.novel
+                              ? '小说'
+                              : _typeFilter == ContentType.comic
+                                  ? '漫画'
+                                  : _typeFilter == ContentType.video
+                                      ? '视频'
+                                      : '全部'),
                       // 与书籍卡片书名同款：15 / w700 / 同深色
                       style: const TextStyle(
                         fontSize: 15,
@@ -1244,10 +1273,17 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
     );
   }
 
-  /// 当前分组过滤后的小说（未排序）
+  /// 当前分组/类型过滤后的书（未排序）
   List<Book> _visibleBooks(List<Book> source) {
     return source.where((b) {
-      return b.type == ContentType.novel &&
+      final supported = [
+        ContentType.novel,
+        ContentType.comic,
+        ContentType.video,
+      ].contains(b.type);
+      final typeOk = _typeFilter == null || b.type == _typeFilter;
+      return supported &&
+          typeOk &&
           (_groupFilter == null || _groupOf[b.bookUrl] == _groupFilter);
     }).toList();
   }

@@ -1,5 +1,17 @@
-/// 内容类型保留旧值以兼容已保存书架数据；新版本仅支持小说。
+/// 内容类型：小说、漫画、视频。
 enum ContentType { novel, comic, video }
+
+/// Legado 书源的实现方式。
+///
+/// [standard] 为普通 JSON 规则；[jsRule] 在规则里嵌入 JS；
+/// [jsFile] 为 JavaScript 单文件书源；[webView] 依赖页面渲染后取 DOM。
+enum SourceImplementation {
+  standard,
+  extendedRule,
+  jsRule,
+  jsFile,
+  webView,
+}
 
 /// 书源规则模型（类 Legado 的 JSON 规则书源）
 class BookSource {
@@ -8,6 +20,7 @@ class BookSource {
   final String baseUrl;
   final ContentType type;
   final bool enabled;
+  final Map<String, String> headers;
   final SearchRule search;
   final DetailRule detail;
   final TocRule? toc;
@@ -16,17 +29,38 @@ class BookSource {
   /// 发现页标签（榜单/分类）。为空 = 不支持发现。
   final List<DiscoverTabRule> discover;
 
+  /// 实现方式；老书源默认 [SourceImplementation.standard]。
+  final SourceImplementation implementation;
+
+  /// 原始 Legado JSON。JS/WebView 书源运行时需要原始规则。
+  final String? legadoJson;
+
+  /// JavaScript 单文件书源代码。
+  final String? jsCode;
+
+  /// Legado jsLib 公共脚本。
+  final String? jsLib;
+
+  /// WebView 规则（原始 JSON 片段）。
+  final String? webViewRule;
+
   const BookSource({
     required this.id,
     required this.name,
     required this.baseUrl,
     required this.type,
     this.enabled = true,
+    this.headers = const {},
     required this.search,
     required this.detail,
     this.toc,
     this.content,
     this.discover = const [],
+    this.implementation = SourceImplementation.standard,
+    this.legadoJson,
+    this.jsCode,
+    this.jsLib,
+    this.webViewRule,
   });
 
   factory BookSource.fromJson(Map<String, dynamic> json) {
@@ -40,6 +74,9 @@ class BookSource {
         orElse: () => ContentType.novel,
       ),
       enabled: json['enabled'] as bool? ?? true,
+      headers: (json['headers'] as Map<String, dynamic>? ?? {}).map(
+        (key, value) => MapEntry(key, value as String),
+      ),
       search: SearchRule.fromJson(
         (json['search'] as Map<String, dynamic>?) ?? {},
       ),
@@ -55,8 +92,52 @@ class BookSource {
       discover: (json['discover'] as List<dynamic>? ?? [])
           .map((e) => DiscoverTabRule.fromJson(e as Map<String, dynamic>))
           .toList(),
+      implementation: SourceImplementation.values.firstWhere(
+        (v) => v.name == (json['implementation'] ?? 'standard'),
+        orElse: () => SourceImplementation.standard,
+      ),
+      legadoJson: json['legadoJson'] as String?,
+      jsCode: json['jsCode'] as String?,
+      jsLib: json['jsLib'] as String?,
+      webViewRule: json['webViewRule'] as String?,
     );
   }
+
+  BookSource copyWith({
+    String? id,
+    String? name,
+    String? baseUrl,
+    ContentType? type,
+    bool? enabled,
+    Map<String, String>? headers,
+    SearchRule? search,
+    DetailRule? detail,
+    TocRule? toc,
+    ContentRule? content,
+    List<DiscoverTabRule>? discover,
+    SourceImplementation? implementation,
+    String? legadoJson,
+    String? jsCode,
+    String? jsLib,
+    String? webViewRule,
+  }) => BookSource(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    baseUrl: baseUrl ?? this.baseUrl,
+    type: type ?? this.type,
+    enabled: enabled ?? this.enabled,
+    headers: headers ?? this.headers,
+    search: search ?? this.search,
+    detail: detail ?? this.detail,
+    toc: toc ?? this.toc,
+    content: content ?? this.content,
+    discover: discover ?? this.discover,
+    implementation: implementation ?? this.implementation,
+    legadoJson: legadoJson ?? this.legadoJson,
+    jsCode: jsCode ?? this.jsCode,
+    jsLib: jsLib ?? this.jsLib,
+    webViewRule: webViewRule ?? this.webViewRule,
+  );
 }
 
 /// 发现页单个标签（榜单或分类）规则。
@@ -105,20 +186,20 @@ class DiscoverTabRule {
   });
 
   factory DiscoverTabRule.fromJson(Map<String, dynamic> j) => DiscoverTabRule(
-        key: j['key'] as String? ?? '',
-        name: j['name'] as String? ?? '',
-        isRank: j['isRank'] as bool? ?? false,
-        url: j['url'] as String? ?? '',
-        cardList: j['cardList'] as String?,
-        cardName: j['cardName'] as String?,
-        cardAuthor: j['cardAuthor'] as String?,
-        cardCover: j['cardCover'] as String?,
-        cardBookUrl: j['cardBookUrl'] as String?,
-        cardLastChapter: j['cardLastChapter'] as String?,
-        cardCoverPattern: j['cardCoverPattern'] as String?,
-        pageCount: j['pageCount'] as String?,
-        pageLinks: j['pageLinks'] as String?,
-      );
+    key: j['key'] as String? ?? '',
+    name: j['name'] as String? ?? '',
+    isRank: j['isRank'] as bool? ?? false,
+    url: j['url'] as String? ?? '',
+    cardList: j['cardList'] as String?,
+    cardName: j['cardName'] as String?,
+    cardAuthor: j['cardAuthor'] as String?,
+    cardCover: j['cardCover'] as String?,
+    cardBookUrl: j['cardBookUrl'] as String?,
+    cardLastChapter: j['cardLastChapter'] as String?,
+    cardCoverPattern: j['cardCoverPattern'] as String?,
+    pageCount: j['pageCount'] as String?,
+    pageLinks: j['pageLinks'] as String?,
+  );
 }
 
 /// 搜索规则
@@ -146,16 +227,16 @@ class SearchRule {
   });
 
   factory SearchRule.fromJson(Map<String, dynamic> json) => SearchRule(
-        urlTemplate: json['url'] as String? ?? '',
-        method: (json['method'] as String? ?? 'GET').toUpperCase(),
-        charset: json['charset'] as String? ?? 'utf-8',
-        bookList: json['bookList'] as String? ?? '',
-        name: json['name'] as String? ?? '',
-        author: json['author'] as String? ?? '',
-        cover: json['cover'] as String? ?? '',
-        bookUrl: json['bookUrl'] as String? ?? '',
-        lastChapter: json['lastChapter'] as String?,
-      );
+    urlTemplate: json['url'] as String? ?? '',
+    method: (json['method'] as String? ?? 'GET').toUpperCase(),
+    charset: json['charset'] as String? ?? 'utf-8',
+    bookList: json['bookList'] as String? ?? '',
+    name: json['name'] as String? ?? '',
+    author: json['author'] as String? ?? '',
+    cover: json['cover'] as String? ?? '',
+    bookUrl: json['bookUrl'] as String? ?? '',
+    lastChapter: json['lastChapter'] as String?,
+  );
 }
 
 /// 详情规则
@@ -177,13 +258,13 @@ class DetailRule {
   });
 
   factory DetailRule.fromJson(Map<String, dynamic> json) => DetailRule(
-        name: json['name'] as String? ?? '',
-        author: json['author'] as String? ?? '',
-        cover: json['cover'] as String? ?? '',
-        intro: json['intro'] as String? ?? '',
-        tocUrl: json['tocUrl'] as String? ?? '',
-        lastChapter: json['lastChapter'] as String? ?? '',
-      );
+    name: json['name'] as String? ?? '',
+    author: json['author'] as String? ?? '',
+    cover: json['cover'] as String? ?? '',
+    intro: json['intro'] as String? ?? '',
+    tocUrl: json['tocUrl'] as String? ?? '',
+    lastChapter: json['lastChapter'] as String? ?? '',
+  );
 }
 
 /// 目录规则
@@ -215,13 +296,13 @@ class TocRule {
   });
 
   factory TocRule.fromJson(Map<String, dynamic> json) => TocRule(
-        chapterList: json['chapterList'] as String? ?? '',
-        chapterName: json['chapterName'] as String? ?? 'a@text',
-        chapterUrl: json['chapterUrl'] as String? ?? 'a@href',
-        nextTocUrl: json['nextTocUrl'] as String?,
-        pageUrlTemplate: json['pageUrlTemplate'] as String?,
-        pageCount: json['pageCount'] as String?,
-      );
+    chapterList: json['chapterList'] as String? ?? '',
+    chapterName: json['chapterName'] as String? ?? 'a@text',
+    chapterUrl: json['chapterUrl'] as String? ?? 'a@href',
+    nextTocUrl: json['nextTocUrl'] as String?,
+    pageUrlTemplate: json['pageUrlTemplate'] as String?,
+    pageCount: json['pageCount'] as String?,
+  );
 }
 
 /// 正文规则
@@ -237,8 +318,8 @@ class ContentRule {
   });
 
   factory ContentRule.fromJson(Map<String, dynamic> json) => ContentRule(
-        content: json['content'] as String? ?? '',
-        nextContentUrl: json['nextContentUrl'] as String?,
-        mergePages: json['mergePages'] as bool? ?? true,
-      );
+    content: json['content'] as String? ?? '',
+    nextContentUrl: json['nextContentUrl'] as String?,
+    mergePages: json['mergePages'] as bool? ?? true,
+  );
 }

@@ -118,6 +118,9 @@ class ShuqiSource implements NovelSource {
   @override
   Map<String, String>? get imageHeaders => {'Referer': '$_web/'};
 
+  @override
+  Future<String?> videoUrl(Chapter chapter) async => null;
+
   late final List<int> _ks = base64Decode(_keystreamB64);
 
   // 每次会话生成一次设备指纹（与 Python 模块级 DEVICE 一致）

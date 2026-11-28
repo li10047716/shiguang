@@ -7,8 +7,10 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../models/book_source.dart';
 import '../../services/search_aggregator.dart';
 import '../book/book_detail_page.dart';
+import '../widgets/type_tag.dart';
 import '../glass.dart';
 import '../widgets/cover_image.dart';
 import 'search_page.dart';
@@ -185,8 +187,18 @@ class _AggregatedTileState extends State<_AggregatedTile> {
                           sourceId: item.coverSourceId),
                     ),
             ),
-            title: Text(item.name,
-                maxLines: 1, overflow: TextOverflow.ellipsis),
+            title: Row(
+              children: [
+                Flexible(
+                  child: Text(item.name,
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+                if (item.type != ContentType.novel) ...[
+                  const SizedBox(width: 6),
+                  TypeTag(type: item.type),
+                ],
+              ],
+            ),
             subtitle: Text(
               item.author.isEmpty ? '佚名' : item.author,
               maxLines: 1,
